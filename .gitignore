@@ -1,0 +1,13 @@
+# 本地配置（每人不同，不入库）
+.claude/settings.local.json
+
+# Node（daemon / PWA 将来使用）
+node_modules/
+dist/
+build/
+*.log
+
+# 系统杂物
+.DS_Store
+Thumbs.db
+desktop.ini
