@@ -21,11 +21,11 @@
 
 ## 4. 会话域服务
 
-- [ ] 4.1 SessionRegistry：聚合 rollout 既有会话与实时会话、维护五态状态机（waitingOnApproval → waiting_approval），单测覆盖状态迁移
-- [ ] 4.2 会话操作：新建（白名单校验）、恢复（单写者冲突 → `SESSION_BUSY`）、发消息（运行中排队）、中断；服务层单测 + 真连集成（slow）
-- [ ] 4.3 审批域：请求登记、决定提交（四决定转发）、轮次结束作废（`APPROVAL_EXPIRED`），单测覆盖 specs 审批场景
-- [ ] 4.4 审计存储：bun:sqlite append-only 写入 + 分页查询，单测验证记录字段完整且倒序
-- [ ] 4.5 白名单目录浏览服务（fs 列目录，白名单外一律拒绝），单测含越界路径用例
+- [x] 4.1 SessionRegistry：聚合 rollout 既有会话与实时会话、维护五态状态机（waitingOnApproval → waiting_approval），单测覆盖状态迁移
+- [x] 4.2 会话操作：新建（白名单校验）、恢复（单写者冲突 → `SESSION_BUSY`）、发消息（运行中排队）、中断；服务层单测 + 真连集成（slow）
+- [x] 4.3 审批域：请求登记、决定提交（四决定转发）、轮次结束作废（`APPROVAL_EXPIRED`），单测覆盖 specs 审批场景
+- [x] 4.4 审计存储：bun:sqlite append-only 写入 + 分页查询，单测验证记录字段完整且倒序
+- [x] 4.5 白名单目录浏览服务（fs 列目录，白名单外一律拒绝），单测含越界路径用例
 
 ## 5. HTTP/WS 接口层
 
