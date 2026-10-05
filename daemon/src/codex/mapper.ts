@@ -34,6 +34,7 @@ export type MappedFact =
       outputTail: string | null;
     }
   | { kind: "queueChanged"; threadId: string; queued: number }
+  | { kind: "patchUpdated"; threadId: string; itemId: string; patch: string | null }
   | { kind: "turnCompleted"; threadId: string; error: string | null }
   | { kind: "tokenUsage"; threadId: string; totalTokens: number; inputTokens: number; cachedInputTokens: number; outputTokens: number }
   | {
@@ -168,6 +169,10 @@ export function mapNotification(n: CodexNotification): MappedFact | null {
       const q = p.queue ?? p.queued;
       const queued = Array.isArray(q) ? q.length : (num(q) ?? 0);
       return { kind: "queueChanged", threadId, queued };
+    }
+    case "item/fileChange/patchUpdated": {
+      const patch = str(p.patch);
+      return { kind: "patchUpdated", threadId, itemId: str(p.itemId) ?? "", patch };
     }
     case "turn/completed": {
       const turn = (p.turn ?? {}) as Record<string, unknown>;

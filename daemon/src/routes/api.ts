@@ -32,6 +32,11 @@ function errorBody(code: string, message: string) {
 
 export function authMiddleware(tokenRef: { token: string }): MiddlewareHandler {
   return async (c, next) => {
+    // WS 端点走自己的查询参数认证（浏览器 WS 不能带 header）
+    if (c.req.path === API.ws) {
+      await next();
+      return;
+    }
     const auth = c.req.header("Authorization");
     if (auth !== `Bearer ${tokenRef.token}`) {
       return c.json(errorBody("UNAUTHORIZED", "缺失或无效 token"), 401);

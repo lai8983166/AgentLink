@@ -89,10 +89,17 @@ export class SessionRegistry {
     for (const t of threads) {
       this.knownCodexThreads.add(t.id);
       if (this.live.has(t.id)) continue;
+      const env = t.environments?.[0] as Record<string, unknown> | undefined;
+      const roots = (env?.runtimeWorkspaceRoots as string[] | undefined) ?? [];
+      const cwd =
+        (typeof env?.cwd === "string" && env.cwd) ||
+        (typeof (t as { cwd?: unknown }).cwd === "string" && (t as { cwd?: string }).cwd) ||
+        roots[0] ||
+        "";
       this.rolloutIndex.set(t.id, {
         id: t.id,
         title: (t.preview ?? "").slice(0, 40) || "既有会话",
-        cwd: t.environments?.[0]?.cwd ?? "",
+        cwd,
         agent: "codex",
         status: "idle",
         preview: t.preview ?? "",
@@ -374,6 +381,27 @@ export class SessionRegistry {
       }
       case "queueChanged": {
         this.bus.publish(f.threadId, { type: "session.queue", queued: f.queued });
+        return;
+      }
+      case "patchUpdated": {
+        // 文件改动 patch 到达（diff 全屏的数据源）；更新历史并重发 tool.finished 供客户端补内容
+        const s = this.live.get(f.threadId);
+        if (s && f.patch) {
+          const h = s.history.find((x) => x.type === "toolCall" && x.id === f.itemId);
+          if (h && h.type === "toolCall" && !h.outputTail) {
+            h.outputTail = f.patch.length > 8000 ? `${f.patch.slice(0, 8000)}…` : f.patch;
+            this.bus.publish(f.threadId, {
+              type: "tool.finished",
+              itemId: f.itemId,
+              kind: h.kind,
+              target: h.target,
+              exitCode: h.exitCode,
+              durationMs: h.durationMs,
+              diffStat: h.diffStat,
+              outputTail: h.outputTail,
+            });
+          }
+        }
         return;
       }
       case "turnCompleted": {
