@@ -12,18 +12,20 @@ import { AuditStore } from "./domain/audit";
 import { ApprovalService } from "./domain/approvals";
 import { SessionRegistry } from "./domain/sessions";
 import { FsService } from "./domain/fs";
+import { NtfyGateway, type NtfyConfig } from "./notify/ntfy";
 import { DAEMON_VERSION } from "./server-version";
+import { randomUUID } from "node:crypto";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
 
-/** 装配完整 daemon 应用（REST + WS + 静态托管） */
+/** 装配完整 daemon 应用（REST + WS + 静态托管 + ntfy 旁路） */
 export interface DaemonApp {
   app: Hono;
   registry: SessionRegistry;
   approvals: ApprovalService;
   audit: AuditStore;
   bridge: CodexBridge;
-  token: string;
+  auth: { token: string };
 }
 
 export function createApp(opts: {
@@ -32,8 +34,12 @@ export function createApp(opts: {
   bridge: CodexBridge;
   webDist?: string;
   auditPath?: string;
+  ntfy?: NtfyConfig;
+  /** 轮换后持久化回调（写配置文件） */
+  onTokenRotate?: (newToken: string) => void;
 }): DaemonApp {
   const app = new Hono();
+  const auth = { token: opts.token };
 
   // 健康检查：无需认证
   app.get(API.health, (c) => c.json({ ok: true, daemon: "agentlink", version: DAEMON_VERSION }));
@@ -46,14 +52,36 @@ export function createApp(opts: {
   const registry = new SessionRegistry(opts.bridge, bus, approvals, fs);
 
   // REST
-  app.route("/", createApiRouter({ token: opts.token, registry, approvals, audit, fs }));
+  app.route(
+    "/",
+    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth }),
+  );
 
-  // WS：查询参数认证（浏览器 WS 不能带 header）
+  // token 轮换（remote-access spec：轮换后旧 token 立即失效）
+  app.post("/api/v1/admin/token/rotate", async (c) => {
+    if (c.req.header("Authorization") !== `Bearer ${auth.token}`) {
+      return c.json({ error: { code: "UNAUTHORIZED", message: "认证失败" } }, 401);
+    }
+    auth.token = randomUUID().replace(/-/g, "");
+    opts.onTokenRotate?.(auth.token);
+    return c.json({ token: auth.token });
+  });
+
+  // ntfy 旁路（任务 6.2）：审批请求 + 完成/出错；通道故障不影响主链路
+  const ntfy = new NtfyGateway(
+    opts.ntfy ?? { enabled: false, url: "", topicPrefix: "agentlink", clickBase: "" },
+  );
+  approvals.onRequest((a) => ntfy.approvalRequest(a));
+  bus.tap((e) => {
+    if ("type" in e) ntfy.onEvent(e as Parameters<typeof ntfy.onEvent>[0]);
+  });
+
+  // WS：查询参数认证（浏览器 WS 不能带 header）；轮换后旧 token 即刻失效
   app.get(
     API.ws,
     upgradeWebSocket((c) => {
       const token = c.req.query("token");
-      if (token !== opts.token) {
+      if (token !== auth.token) {
         return {
           onOpen(evt, ws) {
             ws.send(JSON.stringify({ type: "error", code: "UNAUTHORIZED", message: "认证失败" }));
@@ -93,7 +121,7 @@ export function createApp(opts: {
     });
   }
 
-  return { app, registry, approvals, audit, bridge: opts.bridge, token: opts.token };
+  return { app, registry, approvals, audit, bridge: opts.bridge, auth };
 }
 
 /** serveStatic 的 root 相对于进程 CWD，这里换成相对 import 路径的 posix 形式 */

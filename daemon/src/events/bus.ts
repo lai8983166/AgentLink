@@ -22,6 +22,7 @@ export class SessionEventBus {
   private counters = new Map<string, number>();
   private subs: Subscription[] = [];
   private listSubs: Listener[] = [];
+  private taps = new Set<Listener>();
 
   /** 发布会话事件：自动分配序号、入缓冲、广播 */
   publish(
@@ -35,6 +36,7 @@ export class SessionEventBus {
     if (buf.length > BUFFER_CAP) buf.splice(0, buf.length - BUFFER_CAP);
     this.buffers.set(sessionId, buf);
     for (const s of this.subs) if (s.sessionId === sessionId) s.listener(full);
+    for (const t of this.taps) t(full);
     return full;
   }
 
@@ -45,7 +47,14 @@ export class SessionEventBus {
     this.listBuffer.push(full);
     if (this.listBuffer.length > BUFFER_CAP) this.listBuffer.splice(0, this.listBuffer.length - BUFFER_CAP);
     for (const l of this.listSubs) l(full);
+    for (const t of this.taps) t(full);
     return full;
+  }
+
+  /** 全局旁路（ntfy 等）：所有事件实时经过，不回放历史 */
+  tap(cb: Listener): () => void {
+    this.taps.add(cb);
+    return () => this.taps.delete(cb);
   }
 
   latestSeq(sessionId: string): number {
