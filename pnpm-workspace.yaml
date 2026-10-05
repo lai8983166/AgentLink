@@ -1,0 +1,4 @@
+packages:
+  - daemon
+  - web
+  - shared
