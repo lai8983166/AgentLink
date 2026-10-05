@@ -56,9 +56,11 @@ export function createRealTransportFactory(): CodexTransportFactory {
       })();
 
       const utf8 = new TextEncoder();
+      const stdin = proc.stdin as import("bun").FileSink;
       return {
         write(line) {
-          proc.stdin.write(utf8.encode(`${line}\n`));
+          stdin.write(utf8.encode(`${line}\n`));
+          stdin.flush();
         },
         kill() {
           proc.kill();
