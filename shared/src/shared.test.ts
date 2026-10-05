@@ -61,8 +61,8 @@ describe("事件契约（2.2）", () => {
       command: "npm install",
       cwd: "F:/x",
       reason: null,
-      availableDecisions: ["accept", { acceptWithExecpolicyAmendment: {} }],
-    } as never);
+      availableDecisions: ["accept", { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["bash"] } }],
+    });
     if (e.type === "approval.request") {
       expect(e.availableDecisions).toHaveLength(2);
     }
