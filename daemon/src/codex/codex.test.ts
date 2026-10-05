@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { JsonRpcConnection } from "./rpc";
 import { mapNotification, mapServerRequest } from "./mapper";
 import { CodexBridge, DaemonError } from "./bridge";
-import type { CodexTransport, CodexTransportFactory } from "./process";
+import { FakeCodexServer } from "../testing/fake-codex";
 
 /* ============ 3.1 分帧与分发 ============ */
 
@@ -222,50 +222,6 @@ describe("映射器 mapServerRequest（审批）", () => {
 });
 
 /* ============ 3.4 桥接层：审批挂起 → 决定回包 ============ */
-
-class FakeCodexServer implements CodexTransportFactory {
-  written: string[] = [];
-  private onData: ((c: string) => void) | null = null;
-
-  create(onData: (c: string) => void): CodexTransport {
-    this.onData = onData;
-    return {
-      write: (line) => {
-        this.written.push(line);
-        this.handle(line);
-      },
-      kill: () => {},
-      onExit: () => {},
-    };
-  }
-
-  private handle(line: string): void {
-    const msg = JSON.parse(line);
-    if (typeof msg.id === "number" && msg.method) {
-      // 模拟 codex 响应
-      const results: Record<string, unknown> = {
-        initialize: { userAgent: "fake" },
-        "thread/start": { thread: { id: "t1", environments: [{ cwd: "F:/x" }] } },
-        "thread/list": { data: [] },
-        "thread/resume": { thread: { id: "t1" } },
-        "turn/start": { turn: { id: "turn1" } },
-        "turn/interrupt": {},
-        "thread/turns/list": { data: [] },
-      };
-      const result = results[msg.method] ?? {};
-      const err =
-        msg.method === "thread/resume" && msg.params?.threadId === "busy"
-          ? { code: -32600, message: "thread busy already has an active writer" }
-          : undefined;
-      this.send(err ? { jsonrpc: "2.0", id: msg.id, error: err } : { jsonrpc: "2.0", id: msg.id, result });
-    }
-  }
-
-  /** 模拟 codex 推送（通知或请求） */
-  send(obj: unknown): void {
-    this.onData?.(`${JSON.stringify(obj)}\n`);
-  }
-}
 
 describe("CodexBridge", () => {
   test("审批：请求 → 事实流出 → respondApproval 回包", async () => {
