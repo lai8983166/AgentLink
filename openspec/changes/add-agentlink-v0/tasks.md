@@ -3,8 +3,8 @@
 ## 1. 工程脚手架
 
 - [x] 1.1 建 pnpm workspace 三包骨架（`daemon/`、`web/`、`shared/` + 根 tsconfig/biome），空壳下 `pnpm -r build` 通过
-- [ ] 1.2 daemon 起 Bun + Hono 空应用，暴露 `GET /api/v1/health`，curl 返回 200
-- [ ] 1.3 定型开发命令（dev/test/lint/format），README 写明本地启动方式，新克隆可跟跑
+- [x] 1.2 daemon 起 Bun + Hono 空应用，暴露 `GET /api/v1/health`，curl 返回 200
+- [x] 1.3 定型开发命令（dev/test/lint/format），README 写明本地启动方式，新克隆可跟跑
 
 ## 2. shared 契约包
 
