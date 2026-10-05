@@ -38,7 +38,7 @@
 - [x] 6.1 `~/.agentlink/config.toml` 读写（token、白名单根、ntfy 地址/主题）+ token 生成与轮换 CLI；单测 + 手动验证轮换后旧 token 401
 - [x] 6.2 NotifyGateway：三类通知、优先级、同请求去重、ntfy 不可达不影响主链路；mock HTTP 单测 + ntfy 真机手测一条
 - [x] 6.3 Windows 保活开关（SetThreadExecutionState）与日志 token 脱敏；运行观察验证
-- [ ] 6.4 daemon 使用文档（启动、开机自启、配置项说明）写入 `daemon/README.md`
+- [x] 6.4 daemon 使用文档（启动、开机自启、配置项说明）写入 `daemon/README.md`
 
 ## 7. PWA 六屏
 
