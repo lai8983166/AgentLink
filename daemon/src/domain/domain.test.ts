@@ -84,6 +84,9 @@ describe("SessionRegistry 状态机", () => {
     const list = await reg.list();
     expect(list[0]?.id).toBe("t1"); // waiting_approval 排最前
     expect(list.find((s) => s.id === "old1")?.status).toBe("idle"); // rollout 旧会话
+    // 最近有 rollout 写入 → activeElsewhere（正在电脑上使用）
+    expect(list.find((s) => s.id === "old1")?.activeElsewhere).toBe(true);
+    expect(list.find((s) => s.id === "old1")?.lastActivityAt).toBeGreaterThan(0);
   });
 
   test("消息与历史：userMessage/agentMessage/工具进 history", async () => {
