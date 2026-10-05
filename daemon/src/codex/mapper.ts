@@ -25,6 +25,8 @@ export type MappedFact =
       kind: "toolFinished";
       threadId: string;
       itemId: string;
+      toolKind: ToolKind;
+      target: string;
       exitCode: number | null;
       durationMs: number | null;
       added: number | null;
@@ -145,7 +147,18 @@ export function mapNotification(n: CodexNotification): MappedFact | null {
         }
         let outputTail: string | null = str(item.aggregatedOutput) ?? str(item.output);
         if (outputTail && outputTail.length > 4000) outputTail = `${outputTail.slice(0, 4000)}…`;
-        return { kind: "toolFinished", threadId, itemId, exitCode, durationMs, added, removed, outputTail };
+        return {
+          kind: "toolFinished",
+          threadId,
+          itemId,
+          toolKind: tool.toolKind,
+          target: tool.target,
+          exitCode,
+          durationMs,
+          added,
+          removed,
+          outputTail,
+        };
       }
       return null;
     }
@@ -184,6 +197,59 @@ export function mapNotification(n: CodexNotification): MappedFact | null {
     default:
       return null;
   }
+}
+
+/** codex turn item → HistoryItem（旧会话历史重建用） */
+export function historyItemFromCodexItem(item: CodexItem): import("@agentlink/shared").HistoryItem | null {
+  const at = Date.now();
+  if (item.type === "userMessage") {
+    return { type: "userMessage", id: item.id, text: textFromContent(item.content), at };
+  }
+  if (item.type === "agentMessage") {
+    return { type: "agentMessage", id: item.id, text: str(item.text) ?? "", at };
+  }
+  const tool = toolInfo(item);
+  if (tool?.toolKind === "exec") {
+    return {
+      type: "toolCall",
+      id: item.id,
+      kind: "exec",
+      target: tool.target,
+      cmd: tool.cmd,
+      exitCode: num(item.exitCode) ?? num(item.exit_code),
+      durationMs: num(item.durationMs) ?? num(item.duration_ms),
+      diffStat: null,
+      outputTail: (() => {
+        const o = str(item.aggregatedOutput) ?? str(item.output);
+        return o && o.length > 4000 ? `${o.slice(0, 4000)}…` : o;
+      })(),
+      at,
+    };
+  }
+  if (tool?.toolKind === "fileChange") {
+    let added = 0;
+    let removed = 0;
+    const changes = item.changes as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(changes)) {
+      for (const ch of changes) {
+        added += num(ch.added) ?? num(ch.additions) ?? 0;
+        removed += num(ch.removed) ?? num(ch.deletions) ?? 0;
+      }
+    }
+    return {
+      type: "toolCall",
+      id: item.id,
+      kind: "fileChange",
+      target: tool.target,
+      cmd: null,
+      exitCode: null,
+      durationMs: null,
+      diffStat: { added, removed },
+      outputTail: null,
+      at,
+    };
+  }
+  return null;
 }
 
 /** 审批类服务端请求 → 域事实（approval.request） */

@@ -70,7 +70,8 @@ export const SessionEvent = z.discriminatedUnion("type", [
   EventBase.extend({
     type: z.literal("approval.resolved"),
     approvalId: z.string(),
-    decision: ApprovalDecision,
+    /** "expired" 表示审批随轮次结束作废（非用户决定），客户端应移除卡片 */
+    decision: z.union([ApprovalDecision, z.literal("expired")]),
   }),
   EventBase.extend({
     type: z.literal("session.queue"),
