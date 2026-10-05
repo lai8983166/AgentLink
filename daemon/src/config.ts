@@ -12,6 +12,8 @@ export interface DaemonConfig {
     /** 自托管 ntfy 基地址，如 https://ntfy.example.com */
     url: string;
     topicPrefix: string;
+    /** 点击通知的跳转基址（PWA 对外地址） */
+    clickBase: string;
   };
 }
 
@@ -30,20 +32,25 @@ function parseToml(text: string): Record<string, unknown> {
   }
 }
 
+/** TOML 基本字符串转义（反斜杠 + 双引号）——Windows 路径必须转义反斜杠 */
+function esc(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 function serializeToml(c: DaemonConfig): string {
   return [
     "# agentlink daemon 配置",
-    `token = "${c.token}"`,
+    `token = "${esc(c.token)}"`,
     `port = ${c.port}`,
     `keepAlive = ${c.keepAlive}`,
+    "# 白名单根目录（fs 浏览与新任务 projectPath 允许的范围）",
+    `allowedRoots = [${c.allowedRoots.map((r) => `"${esc(r)}"`).join(", ")}]`,
     "",
     "[ntfy]",
     `enabled = ${c.ntfy.enabled}`,
-    `url = "${c.ntfy.url}"`,
-    `topicPrefix = "${c.ntfy.topicPrefix}"`,
-    "",
-    "# 白名单根目录（fs 浏览与新任务 projectPath 允许的范围）",
-    `allowedRoots = [${c.allowedRoots.map((r) => `"${r.replace(/"/g, '\\"')}"`).join(", ")}]`,
+    `url = "${esc(c.ntfy.url)}"`,
+    `topicPrefix = "${esc(c.ntfy.topicPrefix)}"`,
+    `clickBase = "${esc(c.ntfy.clickBase)}"`,
     "",
   ].join("\n");
 }
@@ -56,7 +63,7 @@ export function loadConfig(overrides?: { env?: Record<string, string | undefined
     allowedRoots: [],
     port: 8787,
     keepAlive: true,
-    ntfy: { enabled: false, url: "https://ntfy.example.com", topicPrefix: "agentlink" },
+    ntfy: { enabled: false, url: "https://ntfy.example.com", topicPrefix: "agentlink", clickBase: "" },
   };
 
   mkdirSync(configDir(), { recursive: true });
@@ -76,6 +83,7 @@ export function loadConfig(overrides?: { env?: Record<string, string | undefined
         enabled: typeof ntfy.enabled === "boolean" ? ntfy.enabled : cfg.ntfy.enabled,
         url: typeof ntfy.url === "string" ? ntfy.url : cfg.ntfy.url,
         topicPrefix: typeof ntfy.topicPrefix === "string" ? ntfy.topicPrefix : cfg.ntfy.topicPrefix,
+        clickBase: typeof ntfy.clickBase === "string" ? ntfy.clickBase : cfg.ntfy.clickBase,
       },
     };
   }

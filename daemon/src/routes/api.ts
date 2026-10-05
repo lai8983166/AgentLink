@@ -18,6 +18,8 @@ import { DAEMON_VERSION } from "../server-version";
 
 export interface ApiDeps {
   token: string;
+  /** 可变 token 持有者：轮换后立即生效 */
+  auth?: { token: string };
   registry: SessionRegistry;
   approvals: ApprovalService;
   audit: AuditStore;
@@ -28,10 +30,10 @@ function errorBody(code: string, message: string) {
   return { error: { code, message } };
 }
 
-export function authMiddleware(token: string): MiddlewareHandler {
+export function authMiddleware(tokenRef: { token: string }): MiddlewareHandler {
   return async (c, next) => {
     const auth = c.req.header("Authorization");
-    if (auth !== `Bearer ${token}`) {
+    if (auth !== `Bearer ${tokenRef.token}`) {
       return c.json(errorBody("UNAUTHORIZED", "缺失或无效 token"), 401);
     }
     await next();
@@ -51,7 +53,7 @@ export function errorToResponse(c: Context, e: unknown) {
 export function createApiRouter(deps: ApiDeps): Hono {
   const api = new Hono();
   // 认证只作用于 /api/v1/*，不影响静态资源与 SPA fallback
-  api.use("/api/v1/*", authMiddleware(deps.token));
+  api.use("/api/v1/*", authMiddleware(deps.auth ?? { token: deps.token }));
 
   api.get(API.status, (c) =>
     c.json({

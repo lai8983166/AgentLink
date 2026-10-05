@@ -1,4 +1,4 @@
-import { dlopen, suffix } from "bun:ffi";
+import { dlopen, FFIType } from "bun:ffi";
 
 /**
  * Windows 保活（任务 6.3 的一部分）：阻止系统休眠，防止外网遥控时掉线。
@@ -9,8 +9,8 @@ export function keepAlive(enabled: boolean): void {
   try {
     const kernel32 = dlopen("kernel32.dll", {
       SetThreadExecutionState: {
-        args: [suffix.u32],
-        returns: suffix.u32,
+        args: [FFIType.u32],
+        returns: FFIType.u32,
       },
     });
     const ES_CONTINUOUS = 0x80000000;
