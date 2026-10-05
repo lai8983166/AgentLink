@@ -29,7 +29,7 @@ describe("JsonRpcConnection", () => {
     conn.feed('{"id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"t1"}}\n');
     expect(reqs).toHaveLength(1);
     conn.respondServer(7, { decision: "acceptForSession" });
-    expect(JSON.parse(written[0])).toEqual({
+    expect(JSON.parse(written[0] as string)).toEqual({
       jsonrpc: "2.0",
       id: 7,
       result: { decision: "acceptForSession" },
@@ -37,7 +37,7 @@ describe("JsonRpcConnection", () => {
   });
 
   test("非 JSON 行被忽略不炸", () => {
-    const conn = new JsonRpcConnection({ write: () => {} });
+    const conn = new JsonRpcConnection(() => {});
     expect(() => conn.feed("not json\n")).not.toThrow();
   });
 });
@@ -286,7 +286,7 @@ describe("CodexBridge", () => {
     expect(apv?.rpcId).toBe(3);
 
     bridge.respondApproval(3, "acceptForSession");
-    const last = JSON.parse(fake.written[fake.written.length - 1]);
+    const last = JSON.parse(fake.written[fake.written.length - 1] as string);
     expect(last).toEqual({ jsonrpc: "2.0", id: 3, result: { decision: "acceptForSession" } });
   });
 

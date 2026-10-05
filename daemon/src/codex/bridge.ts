@@ -32,7 +32,7 @@ export class CodexBridge {
   private restarting = false;
   private stopped = false;
   private factListeners = new Set<(f: MappedFact) => void>();
-  private exitListeners = new Set<(code: number | null) => void>();
+  private exitListeners = new Set<() => void>();
 
   constructor(private readonly transportFactory: CodexTransportFactory) {}
 
@@ -62,7 +62,7 @@ export class CodexBridge {
   }
 
   private async spawnAndInitialize(): Promise<void> {
-    let resolveReady: () => void;
+    let resolveReady: () => void = () => {};
     const ready = new Promise<void>((r) => {
       resolveReady = r;
     });
