@@ -145,7 +145,7 @@ function SessionCard({ s, alert, dim }: { s: SessionSummary; alert?: boolean; di
     waiting_approval: "等待审批",
     done: "已完成",
     error: "出错",
-    idle: s.activeElsewhere ? "电脑上运行中" : "空闲",
+    idle: s.activeElsewhere ? `${s.activeVia ?? "电脑"}运行中` : "空闲",
   };
   const dot = s.status === "waiting_approval" ? "waiting" : s.activeElsewhere ? "running" : s.status;
   return (

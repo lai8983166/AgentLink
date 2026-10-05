@@ -270,6 +270,7 @@ describe("WsConnectionHandler", () => {
         agent: "codex",
         status: "running",
         activeElsewhere: false,
+        activeVia: null,
         preview: "p",
         lastActivityAt: 1,
         approvalPolicy: "on-request",

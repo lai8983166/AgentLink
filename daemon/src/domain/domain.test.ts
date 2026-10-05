@@ -84,8 +84,9 @@ describe("SessionRegistry 状态机", () => {
     const list = await reg.list();
     expect(list[0]?.id).toBe("t1"); // waiting_approval 排最前
     expect(list.find((s) => s.id === "old1")?.status).toBe("idle"); // rollout 旧会话
-    // 最近有 rollout 写入 → activeElsewhere（正在电脑上使用）
+    // 最近有 rollout 写入 → activeElsewhere（正在电脑上使用）+ 占用方显示名
     expect(list.find((s) => s.id === "old1")?.activeElsewhere).toBe(true);
+    expect(list.find((s) => s.id === "old1")?.activeVia).toBe("ChatGPT 桌面端");
     expect(list.find((s) => s.id === "old1")?.lastActivityAt).toBeGreaterThan(0);
   });
 

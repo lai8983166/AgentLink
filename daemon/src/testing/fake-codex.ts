@@ -31,6 +31,7 @@ export class FakeCodexServer implements CodexTransportFactory {
               cwd: "F:/project/chaomofa",
               environments: [{ cwd: "F:/project/chaomofa" }],
               updatedAt: Math.floor(Date.now() / 1000), // 刚刚活跃 → activeElsewhere
+              originator: "Codex Desktop",
             },
           ],
         },
