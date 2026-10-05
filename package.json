@@ -1,0 +1,20 @@
+{
+  "name": "agentlink",
+  "private": true,
+  "packageManager": "pnpm@10.4.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["@biomejs/biome"]
+  },
+  "scripts": {
+    "dev": "pnpm --filter @agentlink/daemon dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "biome check .",
+    "format": "biome format --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.6.3"
+  }
+}
