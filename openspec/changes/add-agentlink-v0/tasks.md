@@ -58,5 +58,5 @@
 
 ## 9. 外网部署（文档 + 实施）
 
-- [ ] 9.1 撰写部署文档 `docs/deploy-vps.md`：VPS 要点、frps/frpc 配置、Caddy HTTPS（标准 443 与非标端口两条路线）、ntfy 自托管、自启动与休眠策略
+- [x] 9.1 撰写部署文档 `docs/deploy-vps.md`：VPS 要点、frps/frpc 配置、Caddy HTTPS（标准 443 与非标端口两条路线）、ntfy 自托管、自启动与休眠策略
 - [ ] 9.2 用户按文档实际部署 VPS 并外网真机验证（4G 下全流程 + 通知直达），记录延迟与待改进项
