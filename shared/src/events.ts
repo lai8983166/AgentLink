@@ -64,8 +64,8 @@ export const SessionEvent = z.discriminatedUnion("type", [
     command: z.string().nullable(),
     cwd: z.string(),
     reason: z.string().nullable(),
-    /** codex 下发的可用决定（动态按钮），如 ["accept", "cancel"] */
-    availableDecisions: z.array(z.string()),
+    /** codex 下发的可用决定（动态按钮）：字符串或高级决定对象（如 acceptWithExecpolicyAmendment） */
+    availableDecisions: z.array(z.union([z.string(), z.record(z.string(), z.unknown())])),
   }),
   EventBase.extend({
     type: z.literal("approval.resolved"),

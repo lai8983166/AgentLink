@@ -2,15 +2,15 @@
 
 ## 1. 工程脚手架
 
-- [ ] 1.1 建 pnpm workspace 三包骨架（`daemon/`、`web/`、`shared/` + 根 tsconfig/biome），空壳下 `pnpm -r build` 通过
+- [x] 1.1 建 pnpm workspace 三包骨架（`daemon/`、`web/`、`shared/` + 根 tsconfig/biome），空壳下 `pnpm -r build` 通过
 - [ ] 1.2 daemon 起 Bun + Hono 空应用，暴露 `GET /api/v1/health`，curl 返回 200
 - [ ] 1.3 定型开发命令（dev/test/lint/format），README 写明本地启动方式，新克隆可跟跑
 
 ## 2. shared 契约包
 
-- [ ] 2.1 用 zod 定义 REST 请求/响应类型、错误码枚举（`SESSION_BUSY`/`APPROVAL_EXPIRED`/`PATH_NOT_ALLOWED`/`UNAUTHORIZED`/`SNAPSHOT_REQUIRED`），schema 单测通过
-- [ ] 2.2 定义内部事件类型（design.md D4 映射表全部行：`session.status`/`agent.delta`/`agent.message`/`tool.*`/`approval.*`/`session.queue`/`usage.updated`/`error`），含序号字段，类型导出编译通过
-- [ ] 2.3 定义 WS 订阅协议消息（subscribe/unsubscribe/lastSeq），schema 单测通过
+- [x] 2.1 用 zod 定义 REST 请求/响应类型、错误码枚举（`SESSION_BUSY`/`APPROVAL_EXPIRED`/`PATH_NOT_ALLOWED`/`UNAUTHORIZED`/`SNAPSHOT_REQUIRED`），schema 单测通过
+- [x] 2.2 定义内部事件类型（design.md D4 映射表全部行：`session.status`/`agent.delta`/`agent.message`/`tool.*`/`approval.*`/`session.queue`/`usage.updated`/`error`），含序号字段，类型导出编译通过
+- [x] 2.3 定义 WS 订阅协议消息（subscribe/unsubscribe/lastSeq），schema 单测通过
 
 ## 3. codex 桥接层（daemon 核心）
 
