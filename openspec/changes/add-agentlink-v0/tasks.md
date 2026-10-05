@@ -29,9 +29,9 @@
 
 ## 5. HTTP/WS 接口层
 
-- [ ] 5.1 REST 路由全套（design.md D5 端点表）+ Bearer 认证中间件 + 错误 envelope；Hono app 集成测试含 401 与各错误码
-- [ ] 5.2 WS 端点：查询参数认证、订阅消息切换会话、ring buffer（500 条）广播、lastSeq 补发、超窗 `SNAPSHOT_REQUIRED`；集成测试覆盖断线补发场景
-- [ ] 5.3 静态托管 + SPA fallback；curl 验证 `/` 与任意深链路由均返回 index.html
+- [x] 5.1 REST 路由全套（design.md D5 端点表）+ Bearer 认证中间件 + 错误 envelope；Hono app 集成测试含 401 与各错误码
+- [x] 5.2 WS 端点：查询参数认证、订阅消息切换会话、ring buffer（500 条）广播、lastSeq 补发、超窗 `SNAPSHOT_REQUIRED`；集成测试覆盖断线补发场景
+- [x] 5.3 静态托管 + SPA fallback；curl 验证 `/` 与任意深链路由均返回 index.html
 
 ## 6. 配置与运维（daemon）
 
