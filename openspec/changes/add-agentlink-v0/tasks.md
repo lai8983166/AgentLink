@@ -14,10 +14,10 @@
 
 ## 3. codex 桥接层（daemon 核心）
 
-- [ ] 3.1 实现 stdio JSON-RPC 分帧、请求-响应 id 匹配、通知按 threadId 路由；用摸底录制的事件流 fixture 回放，单测覆盖分帧与分发
-- [ ] 3.2 子进程生命周期管理：启动、就绪探测、崩溃自动重启、重启后从 rollout 恢复会话状态；集成测试（真连 codex，标 slow）
-- [ ] 3.3 codex 事件 → 内部事件映射器 + 噪音过滤（`mcpServer/*`、`skills/changed`），回放单测逐行覆盖 D4 映射表
-- [ ] 3.4 审批 server-request 挂起机制：登记 → 广播 → 等手机决定 → 回包 codex；超时随轮次作废；单测模拟"请求-决定-回包"全链路
+- [x] 3.1 实现 stdio JSON-RPC 分帧、请求-响应 id 匹配、通知按 threadId 路由；用摸底录制的事件流 fixture 回放，单测覆盖分帧与分发
+- [x] 3.2 子进程生命周期管理：启动、就绪探测、崩溃自动重启、重启后从 rollout 恢复会话状态；集成测试（真连 codex，标 slow）
+- [x] 3.3 codex 事件 → 内部事件映射器 + 噪音过滤（`mcpServer/*`、`skills/changed`），回放单测逐行覆盖 D4 映射表
+- [x] 3.4 审批 server-request 挂起机制：登记 → 广播 → 等手机决定 → 回包 codex；超时随轮次作废；单测模拟"请求-决定-回包"全链路
 
 ## 4. 会话域服务
 
