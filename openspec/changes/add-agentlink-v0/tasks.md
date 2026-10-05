@@ -42,13 +42,13 @@
 
 ## 7. PWA 六屏
 
-- [ ] 7.1 Vite + React 脚手架：路由、`theme.css`（移植原型 design tokens）、PWA manifest/图标；dev 打开六屏空壳导航正常
-- [ ] 7.2 数据层：TanStack Query 客户端 + WS 管道（订阅、断线重连、lastSeq 补发、快照重建）；模拟 WS 的组件测试覆盖重连补发
-- [ ] 7.3 首页：会话列表、待审批横幅、状态排序、连接 pill、额度显示；组件测试验证排序与横幅联动
-- [ ] 7.4 会话页：动作条、流式渲染、工具卡片折叠/展开、diff 全屏、滚动跟随/暂停、排队消息；组件测试覆盖各交互
-- [ ] 7.5 审批卡片：动态决定按钮（按 availableDecisions）、一键决定、已决态、`SESSION_BUSY`/`APPROVAL_EXPIRED` 友好提示；组件测试覆盖动态按钮场景
-- [ ] 7.6 新任务 sheet：项目选择（最近 + 白名单浏览）、策略三档映射、任务描述提交；组件测试验证三档创建参数
-- [ ] 7.7 设置页（连接/通知开关）与审计页（分页）；深链 `/<sessionId>?approval=` 直达；按 specs 场景手动验收
+- [x] 7.1 Vite + React 脚手架：路由、`theme.css`（移植原型 design tokens）、PWA manifest/图标；dev 打开六屏空壳导航正常
+- [x] 7.2 数据层：TanStack Query 客户端 + WS 管道（订阅、断线重连、lastSeq 补发、快照重建）；模拟 WS 的组件测试覆盖重连补发
+- [x] 7.3 首页：会话列表、待审批横幅、状态排序、连接 pill、额度显示；组件测试验证排序与横幅联动
+- [x] 7.4 会话页：动作条、流式渲染、工具卡片折叠/展开、diff 全屏、滚动跟随/暂停、排队消息；组件测试覆盖各交互
+- [x] 7.5 审批卡片：动态决定按钮（按 availableDecisions）、一键决定、已决态、`SESSION_BUSY`/`APPROVAL_EXPIRED` 友好提示；组件测试覆盖动态按钮场景
+- [x] 7.6 新任务 sheet：项目选择（最近 + 白名单浏览）、策略三档映射、任务描述提交；组件测试验证三档创建参数
+- [x] 7.7 设置页（连接/通知开关）与审计页（分页）；深链 `/<sessionId>?approval=` 直达；按 specs 场景手动验收
 - [ ] 7.8 生产构建接入 daemon 托管，`vite-plugin-pwa` 产物验证；局域网 Android 真机"添加到主屏幕"全屏启动
 
 ## 8. 端到端验收（局域网）
