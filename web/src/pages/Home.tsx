@@ -7,6 +7,12 @@ import { STATUS_ORDER, useStore } from "../store";
 import { NewTaskSheet } from "../components/NewTaskSheet";
 import { useEffect } from "react";
 
+/** 电脑上正被其他入口使用的会话排在运行中之后、已完成之前 */
+function effectiveOrder(s: SessionSummary): number {
+  if (s.activeElsewhere && s.status === "idle") return STATUS_ORDER.running + 0.5;
+  return STATUS_ORDER[s.status];
+}
+
 /** 首页：会话列表 + 待审批横幅 + 连接 pill + 额度（任务 7.3） */
 export function Home() {
   const queryClient = useQueryClient();
@@ -37,11 +43,16 @@ export function Home() {
   }, [queryClient]);
 
   const sessions = [...(sessionsQ.data?.sessions ?? [])].sort(
-    (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.lastActivityAt - a.lastActivityAt,
+    (a, b) =>
+      effectiveOrder(a) - effectiveOrder(b) || b.lastActivityAt - a.lastActivityAt,
   );
   const waiting = sessions.filter((s) => s.status === "waiting_approval");
-  const active = sessions.filter((s) => s.status === "running" || s.status === "waiting_approval");
-  const rest = sessions.filter((s) => s.status !== "running" && s.status !== "waiting_approval");
+  const active = sessions.filter(
+    (s) => s.status === "running" || s.status === "waiting_approval" || s.activeElsewhere,
+  );
+  const rest = sessions.filter(
+    (s) => s.status !== "running" && s.status !== "waiting_approval" && !s.activeElsewhere,
+  );
   const rate = statusQ.data?.rateLimits;
 
   return (
@@ -134,9 +145,9 @@ function SessionCard({ s, alert, dim }: { s: SessionSummary; alert?: boolean; di
     waiting_approval: "等待审批",
     done: "已完成",
     error: "出错",
-    idle: "空闲",
+    idle: s.activeElsewhere ? "电脑上运行中" : "空闲",
   };
-  const dot = s.status === "waiting_approval" ? "waiting" : s.status;
+  const dot = s.status === "waiting_approval" ? "waiting" : s.activeElsewhere ? "running" : s.status;
   return (
     <Link to={`/${s.id}`} className={`card${alert ? " alert" : ""}${dim ? " dim" : ""}`} style={{ textDecoration: "none", color: "inherit", display: "block" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

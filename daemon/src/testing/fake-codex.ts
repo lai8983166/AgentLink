@@ -28,7 +28,9 @@ export class FakeCodexServer implements CodexTransportFactory {
             {
               id: "old1",
               preview: "查看此项目的进展",
+              cwd: "C:/projects/example-app",
               environments: [{ cwd: "C:/projects/example-app" }],
+              updatedAt: Math.floor(Date.now() / 1000), // 刚刚活跃 → activeElsewhere
             },
           ],
         },

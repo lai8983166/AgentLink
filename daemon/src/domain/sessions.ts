@@ -96,14 +96,21 @@ export class SessionRegistry {
         (typeof (t as { cwd?: unknown }).cwd === "string" && (t as { cwd?: string }).cwd) ||
         roots[0] ||
         "";
+      // rollout 最近有写入 = 会话正被其他入口（VS Code/桌面）使用
+      const updatedAtSec =
+        (typeof t.updatedAt === "number" ? t.updatedAt : 0) ||
+        (typeof t.recencyAt === "number" ? t.recencyAt : 0);
+      const lastActivityAt = updatedAtSec > 0 ? updatedAtSec * 1000 : 0;
+      const activeElsewhere = updatedAtSec > 0 && Date.now() / 1000 - updatedAtSec < 300;
       this.rolloutIndex.set(t.id, {
         id: t.id,
-        title: (t.preview ?? "").slice(0, 40) || "既有会话",
+        title: ((t as { name?: string }).name || t.preview || "").slice(0, 40) || "既有会话",
         cwd,
         agent: "codex",
         status: "idle",
+        activeElsewhere,
         preview: t.preview ?? "",
-        lastActivityAt: 0,
+        lastActivityAt,
         approvalPolicy: "on-request",
         pendingApprovals: 0,
       });
@@ -134,6 +141,7 @@ export class SessionRegistry {
         cwd: "",
         agent: "codex",
         status: "idle",
+        activeElsewhere: false,
         preview: "",
         lastActivityAt: 0,
         approvalPolicy: "on-request",
@@ -172,6 +180,7 @@ export class SessionRegistry {
       cwd: abs,
       agent: "codex",
       status: "running",
+      activeElsewhere: false,
       preview: opts.prompt,
       lastActivityAt: Date.now(),
       approvalPolicy: opts.approvalPolicy,
@@ -244,6 +253,7 @@ export class SessionRegistry {
             cwd: f.cwd,
             agent: "codex",
             status: "running",
+            activeElsewhere: false,
             preview: "",
             lastActivityAt: Date.now(),
             approvalPolicy: "on-request",

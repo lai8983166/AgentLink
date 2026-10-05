@@ -59,6 +59,8 @@ export const SessionSummary = z.object({
   cwd: z.string(),
   agent: z.literal("codex"),
   status: SessionStatus,
+  /** 会话正被其他入口（VS Code/Codex Desktop）使用：rollout 最近有写入 */
+  activeElsewhere: z.boolean().default(false),
   preview: z.string(),
   lastActivityAt: z.number(),
   approvalPolicy: ApprovalPolicy,
