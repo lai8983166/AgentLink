@@ -16,6 +16,15 @@ import type { FsService } from "./fs";
 
 /** 会话注册表（任务 4.1/4.2）：状态机 + 事件发布 + 列表聚合 */
 
+/** codex originator → 展示名（实测分布：Codex Desktop / codex_vscode / agentlink…） */
+function originatorLabel(originator: unknown): string {
+  const o = typeof originator === "string" ? originator : "";
+  if (/desktop/i.test(o)) return "ChatGPT 桌面端";
+  if (/vscode/i.test(o)) return "VS Code";
+  if (/agentlink/i.test(o)) return "AgentLink";
+  return o || "其他入口";
+}
+
 interface LiveSession {
   summary: SessionSummary;
   history: HistoryItem[];
@@ -102,6 +111,7 @@ export class SessionRegistry {
         (typeof t.recencyAt === "number" ? t.recencyAt : 0);
       const lastActivityAt = updatedAtSec > 0 ? updatedAtSec * 1000 : 0;
       const activeElsewhere = updatedAtSec > 0 && Date.now() / 1000 - updatedAtSec < 300;
+      const activeVia = activeElsewhere ? originatorLabel(t.originator) : null;
       this.rolloutIndex.set(t.id, {
         id: t.id,
         title: ((t as { name?: string }).name || t.preview || "").slice(0, 40) || "既有会话",
@@ -109,6 +119,7 @@ export class SessionRegistry {
         agent: "codex",
         status: "idle",
         activeElsewhere,
+        activeVia,
         preview: t.preview ?? "",
         lastActivityAt,
         approvalPolicy: "on-request",
@@ -142,6 +153,7 @@ export class SessionRegistry {
         agent: "codex",
         status: "idle",
         activeElsewhere: false,
+        activeVia: null,
         preview: "",
         lastActivityAt: 0,
         approvalPolicy: "on-request",
@@ -181,6 +193,7 @@ export class SessionRegistry {
       agent: "codex",
       status: "running",
       activeElsewhere: false,
+      activeVia: null,
       preview: opts.prompt,
       lastActivityAt: Date.now(),
       approvalPolicy: opts.approvalPolicy,
@@ -254,6 +267,7 @@ export class SessionRegistry {
             agent: "codex",
             status: "running",
             activeElsewhere: false,
+            activeVia: null,
             preview: "",
             lastActivityAt: Date.now(),
             approvalPolicy: "on-request",
