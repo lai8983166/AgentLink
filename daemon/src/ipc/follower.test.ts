@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { IpcClient, type PipeLikeSocket } from "./client";
 import { IpcFollowerSession } from "./follower";
+import type { ConversationState } from "./protocol";
 import type { DesktopFact } from "./mapper";
 
 class FakePipe implements PipeLikeSocket {
@@ -96,7 +97,7 @@ describe("IpcFollowerSession（2.1/2.3）", () => {
     const facts: DesktopFact[] = [];
     f.onFacts = (fs) => facts.push(...fs);
 
-    // 首个快照：基准（抑制差分，仅状态）
+    // 首个快照：基准（抑制差分，仅历史重建信号 + 状态）
     await f.handleStateChange({
       type: "snapshot",
       conversationState: {
@@ -108,7 +109,8 @@ describe("IpcFollowerSession（2.1/2.3）", () => {
       },
     });
     expect(f.lastState?.revision).toBe(5);
-    expect(facts.filter((x) => x.kind !== "session.status")).toHaveLength(0);
+    expect(facts.filter((x) => x.kind !== "session.status" && x.kind !== "history.sync")).toHaveLength(0);
+    expect(facts.some((x) => x.kind === "history.sync")).toBe(true);
 
     // 第二个快照：差分出事实
     await f.handleStateChange({
@@ -139,6 +141,41 @@ describe("IpcFollowerSession（2.1/2.3）", () => {
     });
     const afterFollow = pipe.written.filter((d) => d.includes(Buffer.from("following\":true"))).length;
     expect(afterFollow).toBeGreaterThan(beforeFollow);
+  });
+
+  test("重订阅后首个增量只作基准并通知 history.sync（不整史回流），后续差分恢复", async () => {
+    const { client } = setup();
+    const f = new IpcFollowerSession(client, "c1");
+    await f.start();
+    const facts: DesktopFact[] = [];
+    f.onFacts = (fs) => facts.push(...fs);
+
+    const cs = (revision: number, text?: string): ConversationState => ({
+      id: "c1",
+      revision,
+      turnHistory: {
+        history: {
+          entitiesByKey: text
+            ? { t1: { turnId: "t1", status: "completed", items: [{ type: "agentMessage", text, status: "completed" }] } }
+            : {},
+        },
+      },
+      requests: [],
+    });
+
+    // 建立基准（rev 5）
+    await f.handleStateChange({ type: "snapshot", conversationState: cs(5) });
+    // revision 回退的增量 → 重订阅（suppressNextDiff 置位，增量被吞）
+    await f.handleStateChange({ type: "patch", conversationState: cs(4, "被丢弃的旧文本") });
+    facts.length = 0;
+    // 重订阅后首个到达的是增量（带全量状态、含完整文本）→ 只作基准 + history.sync
+    await f.handleStateChange({ type: "patch", conversationState: cs(6, "完整文本") });
+    expect(f.lastState?.revision).toBe(6);
+    expect(facts.some((x) => x.kind === "history.sync")).toBe(true);
+    expect(facts.some((x) => x.kind === "agent.message")).toBe(false); // 不整史回流
+    // 后续快照差分恢复正常（文本增长照常产出）
+    await f.handleStateChange({ type: "snapshot", conversationState: cs(7, "完整文本（已更新）") });
+    expect(facts.some((x) => x.kind === "agent.message" && x.text === "完整文本（已更新）")).toBe(true);
   });
 
   test("委托操作：startTurn 携带幂等消息 ID 与显式策略", async () => {

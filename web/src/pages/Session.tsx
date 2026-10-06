@@ -38,7 +38,13 @@ export function Session() {
   });
 
   // 进入时：桌面持有 → observe（实时观察）；否则普通恢复（desktopGone 后可直接接）
-  const summary = detailQ.data?.session;
+  // 摘要来源：优先列表缓存（首页已拉过，快）——detail 走 rollout 首拉可达 30s，
+  // 先行 observe 让基准快照尽早落地，history.sync 到达即重拉 detail（快照直出，快）
+  const summary =
+    detailQ.data?.session ??
+    queryClient
+      .getQueryData<{ sessions: Array<{ id: string; activeElsewhere: boolean; desktopGone: boolean }> }>(["sessions"])
+      ?.sessions.find((s) => s.id === sessionId);
   useEffect(() => {
     if (!summary) return;
     if (summary.activeElsewhere && !summary.desktopGone) {
@@ -124,6 +130,11 @@ export function Session() {
         next.set(e.approvalId, { ...cur, resolved: { decision: e.decision } });
         return next;
       });
+      return;
+    }
+    if (e.type === "history.sync") {
+      // 权威历史已重建（基准快照落位）：重拉 detail，收敛增量丢失造成的部分文本
+      queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
       return;
     }
     if (e.type === "agent.delta") {

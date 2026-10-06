@@ -70,7 +70,9 @@ export type DesktopFact =
       reason: string | null;
       availableDecisions: Array<string | Record<string, unknown>>;
     }
-  | { kind: "approval.resolved"; requestId: string };
+  | { kind: "approval.resolved"; requestId: string }
+  /** 基准快照落位（首跟/重订阅/换 owner）：历史权威版已就绪，客户端应重拉 detail */
+  | { kind: "history.sync" };
 
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -285,15 +287,14 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
   const facts: DesktopFact[] = [];
   const prevTurns = new Map((prev?.turns ?? []).map((t) => [t.turnId, t]));
   const seenItemKeys = new Set((prev?.turns ?? []).flatMap((t) => t.items.map((i) => i.key)));
-  const prevTextLen = new Map(
-    (prev?.turns ?? []).flatMap((t) => t.items.map((i) => [i.key, i.text.length] as const)),
+  const prevText = new Map(
+    (prev?.turns ?? []).flatMap((t) => t.items.map((i) => [i.key, i.text] as const)),
   );
 
   for (const turn of next.turns) {
     const prevTurn = prevTurns.get(turn.turnId);
     for (const item of turn.items) {
       const isNew = !seenItemKeys.has(item.key);
-      const prevLen = prevTextLen.get(item.key) ?? 0;
 
       if (item.type === "userMessage") {
         if (isNew && item.text) {
@@ -303,11 +304,14 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
         continue;
       }
       if (item.type === "agentMessage") {
+        const before = prevText.get(item.key);
         if (isNew && item.text) {
           facts.push({ kind: "agent.message", itemId: item.key, text: item.text });
-        } else if (item.text.length > prevLen) {
-          // 快照间文本增长 → 合成流式增量
-          facts.push({ kind: "agent.delta", itemId: item.key, delta: item.text.slice(prevLen) });
+        } else if (item.text !== before && item.text) {
+          // 文本变化（常见为增长）→ 合成流式增量 + 全量消息兜底
+          if (before && item.text.length > before.length) {
+            facts.push({ kind: "agent.delta", itemId: item.key, delta: item.text.slice(before.length) });
+          }
           facts.push({ kind: "agent.message", itemId: item.key, text: item.text });
         }
         seenItemKeys.add(item.key);
@@ -370,8 +374,10 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
   return facts;
 }
 
-/** revision 单调校验（任务 2.3）：返回 false 表示乱序/回退，应丢弃并重建 */
+/** revision 单调校验（任务 2.3）：返回 false 表示乱序/回退，应丢弃并重建。
+ *  相等 revision 放行——桌面流式期间同一 revision 会推多个快照（文本在增长），
+ *  只有严格更旧才是乱序；差分本身按内容收敛，重复推不产生重复事件。 */
 export function revisionOk(prev: number | null, next: number | null): boolean {
   if (prev === null || next === null) return true; // 无 revision 字段时以快照为准
-  return next > prev;
+  return next >= prev;
 }

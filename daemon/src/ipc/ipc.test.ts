@@ -166,8 +166,28 @@ describe("revision 校验（2.3）", () => {
   test("单调通过、回退拒绝、缺失放行", () => {
     expect(revisionOk(1, 2)).toBe(true);
     expect(revisionOk(2, 1)).toBe(false);
-    expect(revisionOk(2, 2)).toBe(false);
     expect(revisionOk(null, 5)).toBe(true);
     expect(revisionOk(3, null)).toBe(true);
+  });
+
+  test("相等 revision 放行（流式期间同一 revision 推多个快照，文本在增长）", () => {
+    expect(revisionOk(2, 2)).toBe(true);
+    // 同 revision 快照间文本增长 → 差分照常产出完整消息
+    const s1 = normalizeSnapshot(
+      snapshot({ revision: 7, turnHistory: { history: { entitiesByKey: turn("t1", "inProgress", [{ type: "agentMessage", text: "正在", status: "inProgress" }]) } } }),
+    );
+    const s2 = normalizeSnapshot(
+      snapshot({ revision: 7, turnHistory: { history: { entitiesByKey: turn("t1", "inProgress", [{ type: "agentMessage", text: "正在处理构建任务", status: "inProgress" }]) } } }),
+    );
+    expect(revisionOk(s1.revision, s2.revision)).toBe(true);
+    const facts = diffDesktopState(s1, s2);
+    const msg = facts.find((f) => f.kind === "agent.message");
+    expect(msg).toMatchObject({ text: "正在处理构建任务" });
+    // 等长但内容变化也更新（以最新为准）
+    const s3 = normalizeSnapshot(
+      snapshot({ revision: 7, turnHistory: { history: { entitiesByKey: turn("t1", "inProgress", [{ type: "agentMessage", text: "正在处理别的了", status: "inProgress" }]) } } }),
+    );
+    const facts2 = diffDesktopState(s2, s3);
+    expect(facts2.some((f) => f.kind === "agent.message" && f.text === "正在处理别的了")).toBe(true);
   });
 });
