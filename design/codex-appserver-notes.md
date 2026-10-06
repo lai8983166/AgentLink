@@ -97,3 +97,18 @@ params: { kind:"command", threadId, turnId, itemId,
 - `spike/drive.mjs` — 基础链路：initialize → thread/start → turn/start → 事件流
 - `spike/resume.mjs` — thread/list 翻页 + 旧会话 resume + 历史读取
 - `spike/approval.mjs` — 审批触发 + acceptForSession 回应闭环
+
+## 八、外部会话实时性判定（2026-10-06 补充实验）
+
+问题：手机端能否实时看到 ChatGPT 桌面端 / VS Code 正在运行的会话活动？
+
+**实验**（`spike/live-probe.mjs`，双通道对照，目标会话正在执行任务）：
+- 协议通道：`thread/read` 只读加载 busy 会话成功（不报 writer 错），但 **120s 内 0 条会话事件**
+- 文件通道：rollout 同期增长 ~60KB，事件词汇与 mapper 同构（`event_msg/item_completed`、`response_item/custom_tool_call*`、`token_count`）
+
+**证据链结论**：
+1. 桌面端的 codex.exe 为 stdio 子进程，无监听端口（netstat 验证）→ 无法接入其后端
+2. `~/.codex/app-server-control/` 不存在 → 桌面端不使用托管共享 daemon
+3. `thread/read` 不跨进程转发事件 → 协议层无外部会话实时通道
+4. **rollout 文件直读（watcher）是唯一实时桥梁**，数据完备
+5. `thread/fork` 可在 busy 会话上随时创建继承全部历史的新会话（writer 归调用方）→ 接力接管的官方通道
