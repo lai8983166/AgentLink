@@ -12,6 +12,7 @@ import { AuditStore } from "./domain/audit";
 import { ApprovalService } from "./domain/approvals";
 import { SessionRegistry } from "./domain/sessions";
 import { FsService } from "./domain/fs";
+import { DesktopSessionManager } from "./ipc/desktop-manager";
 import { NtfyGateway, type NtfyConfig } from "./notify/ntfy";
 import { DAEMON_VERSION } from "./server-version";
 import { randomUUID } from "node:crypto";
@@ -51,10 +52,19 @@ export function createApp(opts: {
   const fs = new FsService(opts.allowedRoots);
   const registry = new SessionRegistry(opts.bridge, bus, approvals, fs);
 
+  // 桌面 IPC follower（任务 3.1）：观察/接管桌面持有会话
+  const desktop = new DesktopSessionManager(bus, approvals, {
+    log: (...a: unknown[]) => console.log("[desktop]", ...a),
+  });
+  approvals.desktopDelegate = {
+    decide: (sessionId, requestId, decision) => desktop.decide(sessionId, requestId, decision),
+  };
+  registry.setDesktopManager(desktop);
+
   // REST
   app.route(
     "/",
-    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth }),
+    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth, desktop }),
   );
 
   // token 轮换（remote-access spec：轮换后旧 token 立即失效）

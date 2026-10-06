@@ -36,6 +36,13 @@ export class FakeCodexServer implements CodexTransportFactory {
           ],
         },
         "thread/resume": { thread: { id: "t1" } },
+        "thread/fork": {
+          thread: {
+            id: "fork-1",
+            forkedFromId: (msg.params as { threadId?: string })?.threadId ?? null,
+            environments: [{ cwd: "F:/project/chaomofa" }],
+          },
+        },
         "turn/start": { turn: { id: "turn1" } },
         "turn/interrupt": {},
         "thread/turns/list": {

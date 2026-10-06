@@ -63,6 +63,12 @@ export const SessionSummary = z.object({
   activeElsewhere: z.boolean().default(false),
   /** 占用方显示名（"ChatGPT 桌面端" / "VS Code" 等），仅 activeElsewhere 时非空 */
   activeVia: z.string().nullable().default(null),
+  /** 本会话 fork 自哪个会话（接力谱系） */
+  forkedFromId: z.string().nullable().default(null),
+  /** 本会话存在更近的接力后代（点击旧会话时提示"最新进展在 →"） */
+  forkedToId: z.string().nullable().default(null),
+  /** 桌面端持有者已消失（可走普通恢复接管） */
+  desktopGone: z.boolean().default(false),
   preview: z.string(),
   lastActivityAt: z.number(),
   approvalPolicy: ApprovalPolicy,

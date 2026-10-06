@@ -24,6 +24,12 @@ export interface ApiDeps {
   approvals: ApprovalService;
   audit: AuditStore;
   fs: FsService;
+  desktop?: {
+    observe(id: string, mode?: "observe" | "takeover"): Promise<void>;
+    takeover(id: string): Promise<void>;
+    has(id: string): boolean;
+    stop(id: string): void;
+  };
 }
 
 function errorBody(code: string, message: string) {
@@ -45,11 +51,16 @@ export function authMiddleware(tokenRef: { token: string }): MiddlewareHandler {
   };
 }
 
-/** DaemonError → envelope；zod → VALIDATION_ERROR；其余 → INTERNAL */
+/** DaemonError/IPC 错误 → envelope；zod → VALIDATION_ERROR；其余 → INTERNAL */
 export function errorToResponse(c: Context, e: unknown) {
   if (e instanceof DaemonError) {
-    const status = e.code === "UNAUTHORIZED" ? 401 : e.code.startsWith("SESSION_NOT") || e.code === "APPROVAL_NOT_FOUND" ? 404 : e.code === "VALIDATION_ERROR" ? 400 : e.code === "SESSION_BUSY" || e.code === "APPROVAL_EXPIRED" || e.code === "PATH_NOT_ALLOWED" ? 409 : 500;
+    const status = e.code === "UNAUTHORIZED" ? 401 : e.code.startsWith("SESSION_NOT") || e.code === "APPROVAL_NOT_FOUND" ? 404 : e.code === "VALIDATION_ERROR" ? 400 : e.code === "SESSION_BUSY" || e.code === "APPROVAL_EXPIRED" || e.code === "PATH_NOT_ALLOWED" || e.code === "APPROVAL_ALREADY_DECIDED" ? 409 : 500;
     return c.json(errorBody(e.code, e.message), status as 400 | 401 | 404 | 409 | 500);
+  }
+  // IPC 层错误（Error with IPC_* 前缀）
+  if (e instanceof Error && /^IPC_/.test(e.message)) {
+    const code = e.message.split(":")[0] ?? "IPC_ERROR";
+    return c.json(errorBody(code, e.message), code === "IPC_OWNER_NOT_FOUND" ? 404 : 502);
   }
   console.error("[api] internal error:", e);
   return c.json(errorBody("INTERNAL", "内部错误"), 500);
@@ -101,6 +112,33 @@ export function createApiRouter(deps: ApiDeps): Hono {
   api.post("/api/v1/sessions/:id/interrupt", async (c) => {
     await deps.registry.interrupt(c.req.param("id"));
     return c.json({ ok: true });
+  });
+
+  // 桌面会话：观察 / 接管 / 停止观察（任务 3.2）
+  api.post("/api/v1/sessions/:id/observe", async (c) => {
+    const mode = (await c.req.json().catch(() => ({}))) as { mode?: string };
+    await deps.registry.observe(c.req.param("id"), mode.mode === "takeover" ? "takeover" : "observe");
+    return c.json({ ok: true, mode: mode.mode === "takeover" ? "takeover" : "observe" });
+  });
+
+  api.post("/api/v1/sessions/:id/takeover", async (c) => {
+    await deps.registry.takeover(c.req.param("id"));
+    return c.json({ ok: true, mode: "takeover" });
+  });
+
+  api.post("/api/v1/sessions/:id/unobserve", (c) => {
+    deps.desktop?.stop(c.req.param("id"));
+    return c.json({ ok: true });
+  });
+
+  // 兜底接力（任务 3.2）：fork 出归本方管理的新会话
+  api.post("/api/v1/sessions/:id/fork", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { approvalPolicy?: string };
+    const id = await deps.registry.fork(
+      c.req.param("id"),
+      (body.approvalPolicy as "untrusted" | "on-request" | "never" | undefined) ?? undefined,
+    );
+    return c.json({ id }, 201);
   });
 
   api.patch("/api/v1/sessions/:id", async (c) => {
