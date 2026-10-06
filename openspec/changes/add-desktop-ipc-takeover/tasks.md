@@ -31,10 +31,10 @@
 
 ## 6. 兼容性防护与集成
 
-- [ ] 6.1 slow 兼容性回归（AGENTLINK_SLOW_TESTS=1）：真实桌面只读 discovery + 快照字段存在性断言，缺失报 `IPC_INCOMPATIBLE`；把 desktop-ipc-probe 只读路径改写为测试
-- [ ] 6.2 实现期探测并按需暴露 `thread-follower-steer`（存在则接入中断菜单旁，不存在记录跳过）
-- [ ] 6.3 VS Code 持有会话走同一管道的验证（真实环境 slow 测试），结果记入 `design/codex-appserver-notes.md`
-- [ ] 6.4 daemon README 增补：IPC 能力说明、错误码（IPC_OWNER_NOT_FOUND / IPC_INCOMPATIBLE / APPROVAL_ALREADY_DECIDED）、兜底路径与桌面升级注意事项
+- [x] 6.1 slow 兼容性回归（AGENTLINK_SLOW_TESTS=1）：真实桌面只读 discovery + 快照字段存在性断言，缺失报 `IPC_INCOMPATIBLE`；把 desktop-ipc-probe 只读路径改写为测试
+- [x] 6.2 实现期探测并按需暴露 `thread-follower-steer`（存在则接入中断菜单旁，不存在记录跳过）
+- [x] 6.3 VS Code 持有会话走同一管道的验证（真实环境 slow 测试），结果记入 `design/codex-appserver-notes.md`
+- [x] 6.4 daemon README 增补：IPC 能力说明、错误码（IPC_OWNER_NOT_FOUND / IPC_INCOMPATIBLE / APPROVAL_ALREADY_DECIDED）、兜底路径与桌面升级注意事项
 
 ## 7. 端到端验收
 
