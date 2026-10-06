@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SessionEvent } from "@agentlink/shared";
 import { api, ws } from "../runtime";
@@ -7,6 +7,7 @@ import { applyEventToHistory, followState } from "../store";
 import { ApprovalCard, type PendingApprovalUI } from "../components/ApprovalCard";
 import { ToolCard } from "../components/ToolCard";
 import { MarkdownLite } from "../components/Markdown";
+import { DesktopBanner } from "../components/DesktopBanner";
 
 const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -20,6 +21,7 @@ const STATUS_LABEL: Record<string, string> = {
 export function Session() {
   const { sessionId = "" } = useParams();
   const [search, setSearch] = useSearchParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
@@ -28,14 +30,30 @@ export function Session() {
   const [busyError, setBusyError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState(new Map<string, { req: PendingApprovalUI; resolved: { decision: string } | null }>());
   const [liveStatus, setLiveStatus] = useState<{ status: string; activity: string | null } | null>(null);
+  const [takenOver, setTakenOver] = useState(false);
 
   const detailQ = useQuery({
     queryKey: ["session", sessionId],
     queryFn: () => api.sessionDetail(sessionId),
   });
 
-  // 进入时恢复（单写者冲突 → 友好提示）
+  // 进入时：桌面持有 → observe（实时观察）；否则普通恢复（desktopGone 后可直接接）
+  const summary = detailQ.data?.session;
   useEffect(() => {
+    if (!summary) return;
+    if (summary.activeElsewhere && !summary.desktopGone) {
+      api
+        .observe(sessionId)
+        .then(() => setBusyError(null))
+        .catch((e) => {
+          if ((e as { code?: string }).code === "IPC_OWNER_NOT_FOUND") {
+            setBusyError("找不到会话拥有者（桌面端可能刚关闭）");
+          } else {
+            setBusyError(null);
+          }
+        });
+      return;
+    }
     api
       .resume(sessionId)
       .then(() => setBusyError(null))
@@ -44,7 +62,8 @@ export function Session() {
           setBusyError("会话正在电脑上使用中（IDE / Codex Desktop 占用），先关掉再接管");
         }
       });
-  }, [sessionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, summary?.id, summary?.activeElsewhere, summary?.desktopGone]);
 
   // WS 订阅：事件驱动更新
   useEffect(() => {
@@ -125,6 +144,8 @@ export function Session() {
   const session = detailQ.data?.session;
   const status = liveStatus?.status ?? session?.status ?? "idle";
   const activity = liveStatus?.activity ?? null;
+  const isDesktopBusy = !!session?.activeElsewhere && !session?.desktopGone;
+  const canDrive = !isDesktopBusy || takenOver;
 
   // 滚动跟随
   useEffect(() => {
@@ -195,6 +216,22 @@ export function Session() {
           <Link to="/" style={{ color: "var(--red)", fontWeight: 700, textDecoration: "underline dotted" }}>返回列表</Link>
         </div>
       )}
+
+      {/* 桌面会话：观察/接管/兜底/谱系横幅（任务 5.1-5.3） */}
+      <DesktopBanner
+        sessionId={sessionId}
+        activeElsewhere={!!session?.activeElsewhere}
+        activeVia={session?.activeVia ?? null}
+        desktopGone={!!session?.desktopGone}
+        takenOver={takenOver}
+        forkedFromId={session?.forkedFromId ?? null}
+        forkedToId={session?.forkedToId ?? null}
+        onTakenOver={() => setTakenOver(true)}
+        onForked={(newId) => {
+          queryClient.invalidateQueries({ queryKey: ["sessions"] });
+          navigate(`/${newId}`);
+        }}
+      />
 
       {/* 动作条：当前动作常显 */}
       <div
@@ -316,7 +353,14 @@ export function Session() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder={status === "running" || status === "waiting_approval" ? "发送消息…（运行中将排队）" : "发送消息…"}
+          disabled={!canDrive}
+          placeholder={
+            !canDrive
+              ? "观察模式 · 点上方「接管此会话」后可发指令"
+              : status === "running" || status === "waiting_approval"
+                ? "发送消息…（运行中将排队）"
+                : "发送消息…"
+          }
           style={{
             flex: 1,
             background: "var(--surface)",

@@ -153,6 +153,7 @@ function SessionCard({ s, alert, dim }: { s: SessionSummary; alert?: boolean; di
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span className={`dot ${dot}`} />
         <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {s.forkedFromId && <span title="接力会话" style={{ marginRight: 4 }}>🧬</span>}
           <i className="hash">#</i>
           {s.title || "会话"}
         </span>
