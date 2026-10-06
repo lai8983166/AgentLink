@@ -58,13 +58,25 @@ bun run daemon/src/cli.ts roots add F:/project   # 添加白名单根
 GET    /status /sessions /sessions/:id /fs?path= /audit?cursor= /health(免认证)
 POST   /sessions   {projectPath, approvalPolicy, prompt}
 POST   /sessions/:id/resume | /message {text} | /interrupt
+POST   /sessions/:id/observe {mode?}   # 桌面持有会话：实时观察（IPC follower）
+POST   /sessions/:id/takeover          # 原会话接管（ID 不变，无 fork）
+POST   /sessions/:id/fork              # 兜底接力（owner 发现失败时）
+POST   /sessions/:id/unobserve
 PATCH  /sessions/:id {approvalPolicy}
 POST   /sessions/:id/approvals/:aid {decision}
 POST   /admin/token/rotate
 WS     /ws?token=…（订阅消息切换会话，lastSeq 断线补发）
 ```
 
-错误 envelope：`{error:{code,message}}`；`SESSION_BUSY`（会话被 IDE 占用）、`APPROVAL_EXPIRED`（审批已作废）、`PATH_NOT_ALLOWED`（越出白名单）、`SNAPSHOT_REQUIRED`（事件超出保留窗口，需全量拉取）。
+错误 envelope：`{error:{code,message}}`；`SESSION_BUSY`（会话被占用且未接管）、`APPROVAL_EXPIRED`（审批已作废）、`APPROVAL_ALREADY_DECIDED`（桌面审批已提交过不同决定）、`PATH_NOT_ALLOWED`（越出白名单）、`SNAPSHOT_REQUIRED`（事件超出保留窗口，需全量拉取）、`IPC_OWNER_NOT_FOUND`（找不到会话拥有者→走 fork 兜底）、`IPC_INCOMPATIBLE`（桌面协议不兼容→升级桌面后先跑 slow 回归）。
+
+## 桌面会话接管（desktop-ipc）
+
+- 经 `\\.\pipe\codex-ipc` 以 follower 模式操作 ChatGPT 桌面端 / VS Code 持有的会话：实时同步、发指令、代批审批、中断，**原会话 ID 不变**
+- 前置：桌面端（或 VS Code）保持运行；会话在桌面上打开与否均可
+- 桌面关闭后：会话自动回到可恢复状态（普通 resume 接管）
+- ⚠️ **内部接口**：无稳定性承诺。桌面升级后先跑 `AGENTLINK_SLOW_TESTS=1 pnpm --filter @agentlink/daemon test`（兼容性回归），失败则回退 fork 兜底并反馈
+- 对端版本记录：`~/.agentlink/desktop-ipc.json`
 
 ## 运行时数据
 
