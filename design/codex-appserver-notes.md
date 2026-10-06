@@ -116,3 +116,9 @@ params: { kind:"command", threadId, turnId, itemId,
 5. `thread/fork` 可在 busy 会话上随时创建继承全部历史的新会话（writer 归调用方）→ 接力接管的官方通道
 
 > **更正（2026-10-06 晚）**：上文"rollout 是唯一实时桥梁"的结论**不成立**。`design/desktop-takeover-verification.md` 证实桌面端另有命名管道 IPC（`\.\pipe\codex-ipc`，4 字节小端长度前缀 + JSON），支持 `thread-owner-discovery` 发现会话拥有者 + follower 委托模式：外部客户端可对**原会话**（非 fork）发指令、收 snapshot/patches 实时同步、代批审批、中断——已在真实会话上全部实测通过。IPC 通道优先；rollout watcher 降级为管道不可用时的兜底；fork 降为 owner 发现失败时的兜底。注意：此为内部接口，桌面版升级需回归测试。
+
+## 九、IPC 兼容性回归结论（2026-10-06，任务 6.1-6.3）
+
+- 真实桌面握手/discovery/快照字段存在性：全部通过（READY 测试会话）
+- `thread-follower-steer-turn` 方法名被协议识别（响应 no-client-found 而非 method-not-found）→ **steer 存在**，正式接入时带 targetClientId 验证（任务 6.2 结论）
+- **VS Code 同管道验证通过**：`codex_vscode` 来源活跃会话 `019fdf77-522a-7000-9f56-e4f18c51f29e` discovery 返回 success + handledByClientId → 桌面端与 VS Code 客户端均接入 `\.\pipe\codex-ipc`（任务 6.3 结论）
