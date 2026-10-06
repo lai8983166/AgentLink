@@ -131,7 +131,7 @@ export function Session() {
     if (e.type === "agent.message") {
       setDelta(null);
     }
-    if (e.type === "agent.message" || e.type === "tool.started" || e.type === "tool.finished") {
+    if (e.type === "user.message" || e.type === "agent.message" || e.type === "tool.started" || e.type === "tool.finished") {
       queryClient.setQueryData(["session", sessionId], (old: { session: { history: never[] } } | undefined) => {
         if (!old) return old;
         return { session: { ...old.session, history: applyEventToHistory(old.session.history, e) } };

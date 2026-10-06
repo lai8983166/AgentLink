@@ -47,6 +47,7 @@ export interface DesktopState {
 /** 差分产出的事件（无 seq/at，由总线补齐） */
 export type DesktopFact =
   | { kind: "session.status"; status: "running" | "waiting_approval" | "done" | "error" | "idle"; activity: string | null }
+  | { kind: "user.message"; itemId: string; text: string }
   | { kind: "agent.message"; itemId: string; text: string }
   | { kind: "agent.delta"; itemId: string; delta: string }
   | { kind: "tool.started"; itemId: string; toolKind: "exec" | "fileChange"; target: string; cmd: string | null }
@@ -78,11 +79,90 @@ function itemKey(turnId: string, idx: number, item: IpcTurnItem): string {
   return str(item.id) ?? `${turnId}:${idx}:${item.type ?? "?"}`;
 }
 
+/** 文件改动 changes 兼容两种实测形态：
+ *  数组 [{path, added, removed}]（app-server 风格）
+ *  对象映射 { "路径": {type:'add'|'edit'|'delete', content?, before?, after?} }（rollout/patch_apply 风格，含全文） */
+function extractChanges(item: IpcTurnItem): { added: number; removed: number; content: string | null; paths: string[] } {
+  const changes = item.changes;
+  let added = 0;
+  let removed = 0;
+  const parts: string[] = [];
+  const paths: string[] = [];
+  if (Array.isArray(changes)) {
+    for (const ch of changes) {
+      added += num((ch as { added?: unknown }).added) ?? 0;
+      removed += num((ch as { removed?: unknown }).removed) ?? 0;
+      const p = str((ch as { path?: unknown }).path);
+      if (p) paths.push(p);
+    }
+  } else if (changes && typeof changes === "object") {
+    for (const [path, c] of Object.entries(changes as Record<string, Record<string, unknown>>)) {
+      paths.push(path);
+      const ctype = str(c.type) ?? "";
+      const content = str(c.content);
+      const before = str(c.before);
+      const after = str(c.after);
+      const lineCount = (s: string | null) => (s ? s.split("\n").length : 0);
+      if (ctype === "add" && content) {
+        added += lineCount(content);
+        parts.push(`--- ${path}（新增文件）\n${content
+          .split("\n")
+          .map((l) => `+${l}`)
+          .join("\n")}`);
+      } else if (ctype === "delete") {
+        removed += lineCount(before ?? content);
+        parts.push(`--- ${path}（删除文件）`);
+      } else if (before || after) {
+        removed += lineCount(before);
+        added += lineCount(after);
+        parts.push(
+          `--- ${path}\n${(before ?? "")
+            .split("\n")
+            .filter(Boolean)
+            .map((l) => `-${l}`)
+            .join("\n")}\n${(after ?? "")
+            .split("\n")
+            .filter(Boolean)
+            .map((l) => `+${l}`)
+            .join("\n")}`,
+        );
+      } else if (content) {
+        added += lineCount(content);
+        parts.push(`--- ${path}\n${content}`);
+      }
+    }
+  }
+  const content = parts.length ? parts.join("\n") : null;
+  return {
+    added,
+    removed,
+    content: content && content.length > 8000 ? `${content.slice(0, 8000)}…` : content,
+    paths,
+  };
+}
+
 function normalizeItem(turnId: string, idx: number, item: IpcTurnItem): DesktopTurnItemState | null {
   const type = item.type ?? "";
-  if (type === "userMessage" || type === "reasoning") return null; // 用户消息桌面端自己有；reasoning v0 不渲染
+  if (type === "reasoning") return null; // reasoning v0 不渲染
   const key = itemKey(turnId, idx, item);
   const status = str(item.status);
+  if (type === "userMessage") {
+    // 用户消息（含接管后手机发的指令）——进对话流
+    const text = Array.isArray(item.content)
+      ? item.content.map((c) => str((c as { text?: unknown })?.text) ?? "").join("")
+      : (str(item.text) ?? "");
+    return {
+      key,
+      type: "userMessage",
+      status,
+      text,
+      command: null,
+      outputTail: null,
+      exitCode: null,
+      added: null,
+      removed: null,
+    };
+  }
   if (type === "agentMessage") {
     return {
       key,
@@ -113,26 +193,18 @@ function normalizeItem(turnId: string, idx: number, item: IpcTurnItem): DesktopT
       removed: null,
     };
   }
-  if (type === "fileChange" || type === "apply_patch") {
-    let added = 0;
-    let removed = 0;
-    const changes = item.changes;
-    if (Array.isArray(changes)) {
-      for (const ch of changes) {
-        added += num((ch as { added?: unknown }).added) ?? 0;
-        removed += num((ch as { removed?: unknown }).removed) ?? 0;
-      }
-    }
+  if (type === "fileChange" || type === "apply_patch" || type === "patch_apply") {
+    const ex = extractChanges(item);
     return {
       key,
       type: "fileChange",
       status,
       text: "",
       command: null,
-      outputTail: null,
+      outputTail: ex.content,
       exitCode: null,
-      added,
-      removed,
+      added: ex.added,
+      removed: ex.removed,
     };
   }
   // 未知类型：降级占位卡片（tool.started with generic target）
@@ -210,6 +282,13 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
       const isNew = !seenItemKeys.has(item.key);
       const prevLen = prevTextLen.get(item.key) ?? 0;
 
+      if (item.type === "userMessage") {
+        if (isNew && item.text) {
+          facts.push({ kind: "user.message", itemId: item.key, text: item.text });
+          seenItemKeys.add(item.key);
+        }
+        continue;
+      }
       if (item.type === "agentMessage") {
         if (isNew && item.text) {
           facts.push({ kind: "agent.message", itemId: item.key, text: item.text });

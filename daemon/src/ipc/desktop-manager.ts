@@ -161,6 +161,9 @@ export class DesktopSessionManager {
           });
           this.onSummaryChange?.(conversationId);
           break;
+        case "user.message":
+          this.bus.publish(conversationId, { type: "user.message", itemId: f.itemId, text: f.text });
+          break;
         case "agent.message":
           this.bus.publish(conversationId, { type: "agent.message", itemId: f.itemId, text: f.text });
           break;
