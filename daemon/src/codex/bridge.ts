@@ -180,11 +180,16 @@ export class CodexBridge {
   }
 
   async threadTurns(threadId: string): Promise<CodexThreadTurnsResult> {
-    return this.rpc.call<CodexThreadTurnsResult>(CodexMethod.threadTurnsList, {
+    // desc：取最新轮次（长会话只拉最近 50 轮，旧行为 asc 会停在会话开头）
+    const res = await this.rpc.call<CodexThreadTurnsResult>(CodexMethod.threadTurnsList, {
       threadId,
       cursor: null,
       limit: 50,
+      sortDirection: "desc",
     });
+    // desc 返回最新在前 → 反转成时间正序，供历史渲染
+    if (res?.data) res.data = [...res.data].reverse();
+    return res;
   }
 
   async turnStart(threadId: string, text: string, approvalPolicy: CodexApprovalPolicy): Promise<void> {

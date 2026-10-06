@@ -79,8 +79,9 @@ function itemKey(turnId: string, idx: number, item: IpcTurnItem): string {
   return str(item.id) ?? `${turnId}:${idx}:${item.type ?? "?"}`;
 }
 
-/** 文件改动 changes 兼容两种实测形态：
- *  数组 [{path, added, removed}]（app-server 风格）
+/** 文件改动 changes 兼容三种实测形态：
+ *  数组 [{path, kind:{type}, diff:"@@ hunks"}]（IPC 快照实测，diff 为统一 diff 文本）
+ *  数组 [{path, added, removed}]（app-server 风格统计）
  *  对象映射 { "路径": {type:'add'|'edit'|'delete', content?, before?, after?} }（rollout/patch_apply 风格，含全文） */
 function extractChanges(item: IpcTurnItem): { added: number; removed: number; content: string | null; paths: string[] } {
   const changes = item.changes;
@@ -90,10 +91,22 @@ function extractChanges(item: IpcTurnItem): { added: number; removed: number; co
   const paths: string[] = [];
   if (Array.isArray(changes)) {
     for (const ch of changes) {
-      added += num((ch as { added?: unknown }).added) ?? 0;
-      removed += num((ch as { removed?: unknown }).removed) ?? 0;
       const p = str((ch as { path?: unknown }).path);
       if (p) paths.push(p);
+      const diff = str((ch as { diff?: unknown }).diff);
+      if (diff) {
+        // 统一 diff：数 +/- 行（排除 hunk 头）
+        for (const line of diff.split("\n")) {
+          if (line.startsWith("@@") || line.startsWith("---") || line.startsWith("+++")) continue;
+          if (line.startsWith("+")) added++;
+          else if (line.startsWith("-")) removed++;
+        }
+        const kind = str((ch as { kind?: { type?: unknown } }).kind?.type) ?? "";
+        parts.push(`@@ ${p}（${kind || "update"}）\n${diff}`);
+        continue;
+      }
+      added += num((ch as { added?: unknown }).added) ?? 0;
+      removed += num((ch as { removed?: unknown }).removed) ?? 0;
     }
   } else if (changes && typeof changes === "object") {
     for (const [path, c] of Object.entries(changes as Record<string, Record<string, unknown>>)) {

@@ -114,15 +114,23 @@ const snap = (revision: number, items: unknown[], requests: unknown[] = []) => (
   },
 });
 
+/** 推一个基准快照（被抑制，仅建基准）再推变化 */
+async function pushBase(pipe: Awaited<ReturnType<typeof setup>>["pipe"]) {
+  pipe.pushState("old1", snap(1, []));
+  await new Promise((r) => setTimeout(r, 15));
+}
+
 describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
-  test("observe → 快照差分事件流出（agent.message/状态）", async () => {
+  test("observe → 基准后快照差分事件流出（agent.message/状态/历史直出）", async () => {
     const { registry, pipe, events } = await setup();
     const p = registry.observe("old1");
     pipe.fireConnect();
     await p;
+    await pushBase(pipe);
+    // 历史由快照直出（detail），事件流只承载后续变化
     pipe.pushState(
       "old1",
-      snap(1, [{ type: "agentMessage", text: "桌面正在干活", status: "completed" }]),
+      snap(2, [{ type: "agentMessage", text: "桌面正在干活", status: "completed" }]),
     );
     await new Promise((r) => setTimeout(r, 20));
     expect(events.some((e) => e.type === "agent.message")).toBe(true);
@@ -150,6 +158,7 @@ describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
     const p = registry.observe("old1", "takeover");
     pipe.fireConnect();
     await p;
+    await pushBase(pipe);
     pipe.pushState(
       "old1",
       snap(2, [], [
@@ -181,6 +190,7 @@ describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
     const p = registry.observe("old1");
     pipe.fireConnect();
     await p;
+    await pushBase(pipe);
     pipe.pushState("old1", snap(2, [], [{ id: "r2", kind: "command", command: "rm x", cwd: "F:/x" }]));
     await new Promise((r) => setTimeout(r, 20));
     pipe.pushState("old1", snap(3, [])); // requests 消失
