@@ -19,7 +19,11 @@ export function Home() {
   const wsConnected = useStore((s) => s.wsConnected);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  const sessionsQ = useQuery({ queryKey: ["sessions"], queryFn: () => api.sessions() });
+  const sessionsQ = useQuery({
+    queryKey: ["sessions"],
+    queryFn: () => api.sessions(),
+    refetchInterval: 15000, // 电脑端活动（rollout updatedAt）实时反映到列表顺序
+  });
   const statusQ = useQuery({
     queryKey: ["status"],
     queryFn: () => api.status(),

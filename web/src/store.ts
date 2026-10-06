@@ -39,9 +39,21 @@ export function visibleDecisions(available: Array<string | Record<string, unknow
 /** 事件 → 历史条目增量（会话详情缓存更新的纯函数，测试覆盖） */
 export function applyEventToHistory(history: HistoryItem[], e: SessionEvent): HistoryItem[] {
   switch (e.type) {
-    case "agent.message":
-      if (history.some((h) => h.type === "agentMessage" && h.id === e.itemId)) return history;
+    case "user.message":
+      if (history.some((h) => h.type === "userMessage" && h.id === e.itemId)) return history;
+      return [...history, { type: "userMessage", id: e.itemId, text: e.text, at: e.at }];
+    case "agent.message": {
+      // 同 id 消息：以最新文本为准（快照差分下首见可能是部分文本）
+      const idx = history.findIndex((h) => h.type === "agentMessage" && h.id === e.itemId);
+      if (idx >= 0) {
+        const h = history[idx];
+        if (h && h.type === "agentMessage" && h.text === e.text) return history;
+        const next = [...history];
+        next[idx] = { type: "agentMessage", id: e.itemId, text: e.text, at: e.at };
+        return next;
+      }
       return [...history, { type: "agentMessage", id: e.itemId, text: e.text, at: e.at }];
+    }
     case "tool.started":
       return [
         ...history,

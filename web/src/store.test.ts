@@ -18,12 +18,32 @@ describe("visibleDecisions（任务 7.5：动态按钮）", () => {
 });
 
 describe("applyEventToHistory（任务 7.2/7.4：事件增量）", () => {
-  test("agent.message 追加且去重", () => {
+  test("agent.message 首见部分文本 → 后续全文更新（快照差分语义）", () => {
     let h: HistoryItem[] = [];
-    h = applyEventToHistory(h, { type: "agent.message", sessionId: "s", seq: 1, at: 1, itemId: "m1", text: "好的" });
-    h = applyEventToHistory(h, { type: "agent.message", sessionId: "s", seq: 2, at: 1, itemId: "m1", text: "好的" });
+    h = applyEventToHistory(h, { type: "agent.message", sessionId: "s", seq: 1, at: 1, itemId: "m1", text: "正在" });
     expect(h).toHaveLength(1);
-    expect(h[0]).toMatchObject({ type: "agentMessage", text: "好的" });
+    // 快照推进：全文到达 → 更新而非丢弃
+    h = applyEventToHistory(h, {
+      type: "agent.message",
+      sessionId: "s",
+      seq: 2,
+      at: 2,
+      itemId: "m1",
+      text: "正在分析项目结构并给出方案",
+    });
+    expect(h).toHaveLength(1);
+    expect(h[0]).toMatchObject({ type: "agentMessage", text: "正在分析项目结构并给出方案" });
+    // 相同文本重复 → 不变
+    h = applyEventToHistory(h, { type: "agent.message", sessionId: "s", seq: 3, at: 3, itemId: "m1", text: "正在分析项目结构并给出方案" });
+    expect(h).toHaveLength(1);
+  });
+
+  test("user.message（接管后手机指令）入流且去重", () => {
+    let h: HistoryItem[] = [];
+    h = applyEventToHistory(h, { type: "user.message", sessionId: "s", seq: 1, at: 1, itemId: "u1", text: "跑一下构建" });
+    h = applyEventToHistory(h, { type: "user.message", sessionId: "s", seq: 2, at: 1, itemId: "u1", text: "跑一下构建" });
+    expect(h).toHaveLength(1);
+    expect(h[0]).toMatchObject({ type: "userMessage", text: "跑一下构建" });
   });
 
   test("tool.started → tool.finished 原位更新", () => {

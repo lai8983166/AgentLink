@@ -34,9 +34,38 @@ function turn(turnId: string, status: string, items: unknown[]): ConversationSta
 }
 
 describe("快照规范化（2.2）", () => {
-  test("userMessage/reasoning 被忽略，agentMessage 保留", () => {
+  test("userMessage 保留（接管后手机指令入流），reasoning 忽略", () => {
     const s = normalizeSnapshot(snapshot());
-    expect(s.turns[0]?.items.map((i) => i.type)).toEqual(["agentMessage"]);
+    expect(s.turns[0]?.items.map((i) => i.type)).toEqual(["userMessage", "agentMessage"]);
+    expect(s.turns[0]?.items[0]?.text).toBe("回复 READY");
+  });
+
+  test("fileChange 对象形态（patch_apply 风格，含全文）", () => {
+    const s = normalizeSnapshot(
+      snapshot({
+        turnHistory: {
+          history: {
+            entitiesByKey: turn("t1", "completed", [
+              {
+                type: "fileChange",
+                status: "completed",
+                changes: {
+                  "src/new.ts": { type: "add", content: "line1\nline2" },
+                  "src/edit.ts": { type: "edit", before: "old", after: "new1\nnew2" },
+                },
+              },
+            ]),
+          },
+        },
+      }),
+    );
+    const fc = s.turns[0]?.items[0];
+    expect(fc?.type).toBe("fileChange");
+    expect(fc?.added).toBe(4);
+    expect(fc?.removed).toBe(1);
+    expect(fc?.outputTail).toContain("+line1");
+    expect(fc?.outputTail).toContain("-old");
+    expect(fc?.outputTail).toContain("+new1");
   });
 
   test("未知 item 类型降级占位卡片", () => {
