@@ -65,6 +65,24 @@ export class ApiClient {
   interrupt(id: string) {
     return this.request<{ ok: boolean }>(`/api/v1/sessions/${id}/interrupt`, { method: "POST" });
   }
+  observe(id: string, mode: "observe" | "takeover" = "observe") {
+    return this.request<{ ok: boolean; mode: string }>(`/api/v1/sessions/${id}/observe`, {
+      method: "POST",
+      body: JSON.stringify({ mode }),
+    });
+  }
+  takeover(id: string) {
+    return this.request<{ ok: boolean }>(`/api/v1/sessions/${id}/takeover`, { method: "POST" });
+  }
+  unobserve(id: string) {
+    return this.request<{ ok: boolean }>(`/api/v1/sessions/${id}/unobserve`, { method: "POST" });
+  }
+  fork(id: string, approvalPolicy?: string) {
+    return this.request<{ id: string }>(`/api/v1/sessions/${id}/fork`, {
+      method: "POST",
+      body: JSON.stringify(approvalPolicy ? { approvalPolicy } : {}),
+    });
+  }
   setPolicy(id: string, approvalPolicy: "untrusted" | "on-request" | "never") {
     return this.request<{ ok: boolean }>(`/api/v1/sessions/${id}`, {
       method: "PATCH",
