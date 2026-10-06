@@ -2,10 +2,14 @@ import type { ClientMessage, ListEvent, ServerMessage, SessionEvent } from "@age
 
 /**
  * WS 管道（任务 7.2）：单连接复用、按会话订阅、lastSeq 断线补发、
- * snapshot.required 时回调重建、指数退避重连。
+ * snapshot.required 时回调重建、指数退避重连、应用层心跳探测假死连接。
  * socket 可注入，便于测试。
  */
 export type WsState = "idle" | "connecting" | "open" | "closed";
+
+/** 心跳参数：20s 一跳，45s 无 pong 判假死（WiFi/移动网络闪断时 onclose 不触发） */
+const PING_INTERVAL_MS = 20_000;
+const PONG_STALE_MS = 45_000;
 
 export interface FakeableSocket {
   send(data: string): void;
@@ -31,6 +35,8 @@ export class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffMs = 1000;
   private shouldConnect = false;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPongAt = 0;
 
   constructor(
     private readonly url: () => string,
@@ -45,6 +51,7 @@ export class WsClient {
 
   disconnect(): void {
     this.shouldConnect = false;
+    this.stopHeartbeat();
     this.socket?.close();
     this.socket = null;
     this.setState("idle");
@@ -58,6 +65,7 @@ export class WsClient {
     socket.onopen = () => {
       this.backoffMs = 1000;
       this.setState("open");
+      this.startHeartbeat();
       // 重连后重新订阅全部（带 lastSeq 补发）
       for (const sessionId of this.sessionSinks.keys()) {
         this.sendSubscribe(sessionId);
@@ -66,6 +74,7 @@ export class WsClient {
     };
     socket.onclose = () => {
       this.socket = null;
+      this.stopHeartbeat();
       this.setState("closed");
       if (this.shouldConnect) {
         this.reconnectTimer = setTimeout(() => this.open(), this.backoffMs);
@@ -78,6 +87,32 @@ export class WsClient {
   private setState(s: WsState): void {
     this.state = s;
     this.onStateChange(s);
+  }
+
+  /** 心跳：周期 ping；超过 PONG_STALE_MS 无任何 pong → 判假死强制断开，
+   *  走既有重连路径（lastSeq 补发 / 越窗 snapshot.required 全量重建） */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastPongAt = Date.now();
+    this.pingTimer = setInterval(() => {
+      if (Date.now() - this.lastPongAt > PONG_STALE_MS) {
+        this.socket?.close();
+        return;
+      }
+      this.rawSend({ type: "ping" });
+    }, PING_INTERVAL_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.pingTimer = null;
+  }
+
+  /** 立即检查连接活性（页面从后台恢复时调用，免去等下一跳） */
+  probe(): void {
+    if (this.state === "open" && Date.now() - this.lastPongAt > PONG_STALE_MS) {
+      this.socket?.close();
+    }
   }
 
   private rawSend(m: ClientMessage): void {
@@ -119,6 +154,9 @@ export class WsClient {
         this.onSnapshotRequired(msg.sessionId);
         return;
       }
+      case "pong":
+        this.lastPongAt = Date.now();
+        return;
       default:
         return;
     }
