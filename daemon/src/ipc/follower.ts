@@ -116,6 +116,7 @@ export class IpcFollowerSession {
         this.log(`[follower] snapshot revision 回退，忽略`);
         return;
       }
+      this.captureTemplate(change.conversationState);
       this.emitFacts(diffDesktopState(this.lastState, next));
       this.lastState = next;
       return;
@@ -143,19 +144,30 @@ export class IpcFollowerSession {
 
   /* ============ 委托操作（接管态） ============ */
 
+  /** 最近一次快照的轮次模板（start-turn 用上一轮完整 params 为基底，实测必需） */
+  private turnTemplate: Record<string, unknown> | null = null;
+
+  /** 从快照提取模板（normalizeSnapshot 之外保留原始 params） */
+  captureTemplate(cs: ConversationState): void {
+    const entities = cs.turnHistory?.history?.entitiesByKey ?? {};
+    const last = Object.values(entities).pop();
+    if (last?.params && typeof last.params === "object") {
+      this.turnTemplate = structuredClone(last.params);
+    }
+  }
+
   /** 构造 start-turn 请求（任务 3.4）：上一轮参数为模板 + 显式策略 + 幂等消息 ID */
   buildTurnRequest(input: { text: string; clientUserMessageId?: string; approvalPolicy?: string }): {
     conversationId: string;
     turnStart: { request: Record<string, unknown>; context: { inheritThreadSettings: boolean } };
   } {
-    const template = this.lastState?.turns?.[this.lastState.turns.length - 1];
-    // 从快照 entities 无法直接取原始请求参数——按探测脚本形态用最小请求；
-    // 模板可扩展位：模型等设置经 inheritThreadSettings:false + 默认值传入
-    void template;
-    const request: Record<string, unknown> = {
-      input: [{ type: "text", text: input.text, text_elements: [] }],
-      clientUserMessageId: input.clientUserMessageId ?? randomUUID(),
-    };
+    // 模板基底：克隆上一轮 params（模型/设置等），去掉会话专属附加上下文
+    const request: Record<string, unknown> = this.turnTemplate
+      ? { ...structuredClone(this.turnTemplate) }
+      : {};
+    delete request.additionalContext;
+    request.input = [{ type: "text", text: input.text, text_elements: [] }];
+    request.clientUserMessageId = input.clientUserMessageId ?? randomUUID();
     if (input.approvalPolicy) request.approvalPolicy = input.approvalPolicy;
     return {
       conversationId: this.conversationId,
