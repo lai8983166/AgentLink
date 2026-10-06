@@ -63,15 +63,40 @@ export class IpcFollowerSession {
     return res.handledByClientId;
   }
 
-  /** 开始跟随：发现 + 订阅 + 续订循环 */
+  /** 开始跟随：发现 + 订阅 + 续订循环（幂等：重入复用同一次启动，防 onConnected 竞态重置基准） */
   async start(): Promise<void> {
+    if (this.startPromise) return this.startPromise;
+    this.stopped = false;
+    this.startPromise = this.doStart();
+    return this.startPromise;
+  }
+
+  private async doStart(): Promise<void> {
     await this.discover();
+    this.suppressNextDiff = true; // 首个快照只作基准（历史经 detail 快照直出），不回流全量事件
     this.sendFollowing(true);
     this.followTimer = setInterval(() => {
       if (this.stopped) return;
       this.keepAlive().catch((e) => this.log(`[follower:${this.conversationId.slice(0, 8)}] keepalive:`, e.message));
     }, FOLLOW_INTERVAL_MS);
+    this.established = true;
   }
+
+  /** 管道重连后的重新跟随（重置基准，仅对已建立的会话生效；初次启动中的竞态由 start 幂等吸收） */
+  async restart(): Promise<void> {
+    if (!this.established) return;
+    this.established = false;
+    if (this.followTimer) clearInterval(this.followTimer);
+    this.followTimer = null;
+    this.startPromise = null;
+    this.lastState = null;
+    await this.start();
+  }
+
+  /** 首个快照（或重订阅后首个快照）不产生差分事件 */
+  private suppressNextDiff = false;
+  private startPromise: Promise<void> | null = null;
+  private established = false;
 
   private async keepAlive(): Promise<void> {
     // 拥有者可能变化（桌面重开会话）：重新发现，变化则换目标
@@ -88,6 +113,7 @@ export class IpcFollowerSession {
     this.stopped = true;
     if (this.followTimer) clearInterval(this.followTimer);
     this.followTimer = null;
+    this.startPromise = null;
     this.sendFollowing(false);
   }
 
@@ -104,11 +130,15 @@ export class IpcFollowerSession {
   async resubscribe(): Promise<void> {
     this.sendFollowing(false);
     await this.discover().catch(() => {});
+    this.suppressNextDiff = true;
     this.sendFollowing(true);
   }
 
   /** 桌面推送的状态变化（snapshot 或增量）→ 事实流 */
   async handleStateChange(change: { type?: string; conversationState?: ConversationState; revision?: number }): Promise<void> {
+    if (process.env.AGENTLINK_DEBUG) {
+      console.log(`[follower-dbg] conv=${this.conversationId.slice(0, 8)} suppress=${this.suppressNextDiff} change=${change.type} rev=${change.conversationState?.revision}`);
+    }
     const revision = change.revision ?? change.conversationState?.revision ?? null;
     if (change.type === "snapshot" && change.conversationState) {
       const next = normalizeSnapshot(change.conversationState);
@@ -117,6 +147,20 @@ export class IpcFollowerSession {
         return;
       }
       this.captureTemplate(change.conversationState);
+      if (this.suppressNextDiff) {
+        this.suppressNextDiff = false;
+        // 基准快照：只发一条状态（供列表/横幅同步），历史由 detail 快照直出
+        this.lastState = next;
+        const status = next.requests.length > 0 ? "waiting_approval" : "idle";
+        this.onFacts([
+          {
+            kind: "session.status",
+            status: status as "waiting_approval" | "idle",
+            activity: next.requests[0]?.command ?? null,
+          },
+        ]);
+        return;
+      }
       this.emitFacts(diffDesktopState(this.lastState, next));
       this.lastState = next;
       return;

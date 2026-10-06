@@ -58,9 +58,9 @@ export class DesktopSessionManager {
       );
     };
     client.onConnected = () => {
-      // 管道重连：全部会话重新发现与订阅
+      // 管道重连：已建立的会话重新发现与订阅（重置基准快照）
       for (const [, f] of this.sessions) {
-        f.start().catch((e) => this.log(`[desktop] 重订阅失败:`, e.message));
+        f.restart().catch((e) => this.log(`[desktop] 重订阅失败:`, e.message));
       }
     };
     client.onStateChange = (s) => {
@@ -146,6 +146,50 @@ export class DesktopSessionManager {
     const f = this.sessions.get(conversationId);
     if (!f) throw new Error("IPC_NOT_TAKEN_OVER: 会话未接管");
     await f.decideApproval(requestId, decision);
+  }
+
+  /** 观察中会话的历史：由最新快照直出（完整、无 diff 事件重复） */
+  historyFor(conversationId: string): import("@agentlink/shared").HistoryItem[] | null {
+    const f = this.sessions.get(conversationId);
+    const state = f?.lastState;
+    if (!state) return null;
+    const out: import("@agentlink/shared").HistoryItem[] = [];
+    for (const turn of state.turns) {
+      for (const item of turn.items) {
+        if (item.type === "userMessage") {
+          out.push({ type: "userMessage", id: item.key, text: item.text, at: 0 });
+        } else if (item.type === "agentMessage") {
+          out.push({ type: "agentMessage", id: item.key, text: item.text, at: 0 });
+        } else if (item.type === "commandExecution") {
+          out.push({
+            type: "toolCall",
+            id: item.key,
+            kind: "exec",
+            target: item.command?.split(/\s+/)[0] ?? "命令",
+            cmd: item.command,
+            exitCode: item.exitCode,
+            durationMs: null,
+            diffStat: null,
+            outputTail: item.outputTail,
+            at: 0,
+          });
+        } else if (item.type === "fileChange") {
+          out.push({
+            type: "toolCall",
+            id: item.key,
+            kind: "fileChange",
+            target: item.outputTail?.match(/@@ (.*?)（/)?.[1]?.split(/[\\/]/).pop() ?? "文件改动",
+            cmd: null,
+            exitCode: null,
+            durationMs: null,
+            diffStat: item.added != null && item.removed != null ? { added: item.added, removed: item.removed } : null,
+            outputTail: item.outputTail,
+            at: 0,
+          });
+        }
+      }
+    }
+    return out;
   }
 
   /* ============ 事实 → 内部事件 / 审批（任务 4.1） ============ */

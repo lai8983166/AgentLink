@@ -59,7 +59,13 @@ export function Session() {
       .then(() => setBusyError(null))
       .catch((e) => {
         if ((e as { code?: string }).code === "SESSION_BUSY") {
-          setBusyError("会话正在电脑上使用中（IDE / Codex Desktop 占用），先关掉再接管");
+          // 占用检测是 5 分钟启发式，实际拥有者可能还在（对话开着但闲置）→ 转观察模式
+          api
+            .observe(sessionId)
+            .then(() => setBusyError(null))
+            .catch(() =>
+              setBusyError("会话仍被电脑端占用且观察通道不可用；若桌面端已关闭，请稍候重试"),
+            );
         }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps

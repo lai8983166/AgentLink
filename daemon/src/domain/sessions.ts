@@ -48,6 +48,8 @@ export class SessionRegistry {
     overlay(): Map<string, { status: SessionStatus | null; mode: string; desktopGone: boolean }>;
     sendTurn(id: string, text: string, policy?: string): Promise<void>;
     interrupt(id: string): Promise<void>;
+    /** 观察中会话的快照历史（完整直出，避免 diff 事件重复/截断） */
+    historyFor(id: string): import("@agentlink/shared").HistoryItem[] | null;
     /** 摘要变化回调（属性，由 registry 覆写接线） */
     onSummaryChange: (id: string) => void;
   } | null = null;
@@ -200,7 +202,18 @@ export class SessionRegistry {
         latestSeq: this.bus.latestSeq(id),
       };
     }
-    // rollout 会话：按需拉历史
+    // 观察中的桌面会话：历史由快照直出（完整且与事件流无重复）
+    const desktopHistory = this.desktop?.historyFor(id);
+    if (desktopHistory) {
+      const base = this.mergeDesktopOverlay(id) ?? this.rolloutIndex.get(id);
+      if (base) {
+        return {
+          session: { ...base, history: desktopHistory, tokenUsage: null },
+          latestSeq: this.bus.latestSeq(id),
+        };
+      }
+    }
+    // rollout 会话：按需拉历史（desc：最新 50 轮）
     const turns = await this.bridge.threadTurns(id).catch(() => null);
     if (!turns && !this.knownCodexThreads.has(id)) {
       throw new DaemonError("SESSION_NOT_FOUND", "会话不存在");

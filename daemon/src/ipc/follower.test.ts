@@ -89,25 +89,39 @@ describe("IpcFollowerSession（2.1/2.3）", () => {
     expect(f.ownerLost).toBe(true);
   });
 
-  test("快照差分出事实；revision 跳跃触发重订阅", async () => {
+  test("基准快照抑制事件；后续差分出事实；revision 回退触发重订阅", async () => {
     const { pipe, client } = setup();
     const f = new IpcFollowerSession(client, "c1");
     await f.start();
     const facts: DesktopFact[] = [];
     f.onFacts = (fs) => facts.push(...fs);
 
+    // 首个快照：基准（抑制差分，仅状态）
     await f.handleStateChange({
       type: "snapshot",
       conversationState: {
         id: "c1",
         title: "T",
         revision: 5,
+        turnHistory: { history: { entitiesByKey: {} } },
+        requests: [],
+      },
+    });
+    expect(f.lastState?.revision).toBe(5);
+    expect(facts.filter((x) => x.kind !== "session.status")).toHaveLength(0);
+
+    // 第二个快照：差分出事实
+    await f.handleStateChange({
+      type: "snapshot",
+      conversationState: {
+        id: "c1",
+        title: "T",
+        revision: 6,
         turnHistory: { history: { entitiesByKey: { t1: { turnId: "t1", status: "completed", items: [{ type: "agentMessage", text: "hi", status: "completed" }] } } } },
         requests: [],
       },
     });
     expect(facts.some((x) => x.kind === "agent.message")).toBe(true);
-    expect(f.lastState?.revision).toBe(5);
 
     // revision 回退的快照被拒绝
     facts.length = 0;
