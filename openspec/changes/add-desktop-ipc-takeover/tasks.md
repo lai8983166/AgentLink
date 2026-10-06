@@ -7,9 +7,9 @@
 
 ## 2. Follower 会话层
 
-- [ ] 2.1 实现 `ipc/follower.ts`：thread-owner-discovery（失败抛 `IPC_OWNER_NOT_FOUND`）、following 每 10s 续订、owner 消失探测；假管道单测覆盖发现与续订时序
-- [ ] 2.2 实现 conversationState → 内部事件映射器（turn 差分 → status/agent.message/tool.*；requests[] 差分 → approval.request/resolved；未知 item 类型降级占位卡片），用探测脚本快照样例做 fixture 单测
-- [ ] 2.3 实现 revision 单调校验与快照重建（跳跃即重取），单测覆盖乱序/跳跃增量被拒绝
+- [x] 2.1 实现 `ipc/follower.ts`：thread-owner-discovery（失败抛 `IPC_OWNER_NOT_FOUND`）、following 每 10s 续订、owner 消失探测；假管道单测覆盖发现与续订时序
+- [x] 2.2 实现 conversationState → 内部事件映射器（turn 差分 → status/agent.message/tool.*；requests[] 差分 → approval.request/resolved；未知 item 类型降级占位卡片），用探测脚本快照样例做 fixture 单测
+- [x] 2.3 实现 revision 单调校验与快照重建（跳跃即重取），单测覆盖乱序/跳跃增量被拒绝
 
 ## 3. 路由与接管
 
