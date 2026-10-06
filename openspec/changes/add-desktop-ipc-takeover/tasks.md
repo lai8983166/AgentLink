@@ -13,15 +13,15 @@
 
 ## 3. 路由与接管
 
-- [ ] 3.1 SessionRegistry 集成三态路由（live/desktop/rollout）与 desktopGone 标记→resume 引导，域层单测覆盖路由切换
-- [ ] 3.2 REST：`POST /sessions/:id/observe`、`/takeover`、`/fork`（fork 返回新会话并登记谱系）；`SESSION_BUSY` 语义收敛为"IPC 不可用且未接管"；Hono 集成测试三端点
-- [ ] 3.3 发指令/中断桥接：接管态下 message/interrupt 改走 follower 委托，`clientUserMessageId` 幂等键；单测覆盖重复提交不重复执行
-- [ ] 3.4 start-turn 请求构造（快照模板法 + `inheritThreadSettings:false` + 显式审批策略），单测覆盖模板替换与空模板兜底
+- [x] 3.1 SessionRegistry 集成三态路由（live/desktop/rollout）与 desktopGone 标记→resume 引导，域层单测覆盖路由切换
+- [x] 3.2 REST：`POST /sessions/:id/observe`、`/takeover`、`/fork`（fork 返回新会话并登记谱系）；`SESSION_BUSY` 语义收敛为"IPC 不可用且未接管"；Hono 集成测试三端点
+- [x] 3.3 发指令/中断桥接：接管态下 message/interrupt 改走 follower 委托，`clientUserMessageId` 幂等键；单测覆盖重复提交不重复执行
+- [x] 3.4 start-turn 请求构造（快照模板法 + `inheritThreadSettings:false` + 显式审批策略），单测覆盖模板替换与空模板兜底
 
 ## 4. 审批桥接
 
-- [ ] 4.1 requests[] 差分检测 → approval.request 事件 + ntfy（去重键 `desktop:<requestId>`），单测覆盖去重
-- [ ] 4.2 决定委托 + 幂等表（同决定幂等成功、不同决定 `APPROVAL_ALREADY_DECIDED`）+ 审计落库（source=desktop-delegate），单测覆盖三态
+- [x] 4.1 requests[] 差分检测 → approval.request 事件 + ntfy（去重键 `desktop:<requestId>`），单测覆盖去重
+- [x] 4.2 决定委托 + 幂等表（同决定幂等成功、不同决定 `APPROVAL_ALREADY_DECIDED`）+ 审计落库（source=desktop-delegate），单测覆盖三态
 
 ## 5. 前端
 
