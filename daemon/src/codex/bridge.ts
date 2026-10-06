@@ -147,6 +147,16 @@ export class CodexBridge {
     return res?.data ?? [];
   }
 
+  /** fork 既有会话（含 busy 会话）为归本方管理的新会话（兜底接力） */
+  async threadFork(threadId: string, approvalPolicy: CodexApprovalPolicy): Promise<CodexThreadInfo> {
+    const res = await this.rpc.call<{ thread?: CodexThreadInfo }>(CodexMethod.threadFork, {
+      threadId,
+      approvalPolicy,
+    });
+    if (!res?.thread) throw new DaemonError("INTERNAL", "thread/fork 未返回 thread");
+    return res.thread;
+  }
+
   async threadResume(
     threadId: string,
     approvalPolicy: CodexApprovalPolicy,

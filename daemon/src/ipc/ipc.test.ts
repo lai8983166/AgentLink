@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { diffDesktopState, normalizeSnapshot, revisionOk, type DesktopState } from "./mapper";
-import type { ConversationState } from "./protocol";
+import type { ConversationState, IpcTurnItem } from "./protocol";
 
 /** 验证文档同构的快照样例（结构取自 desktop-takeover-verification.md / 探测脚本输出形态） */
 function snapshot(over: Partial<ConversationState> = {}): ConversationState {
@@ -29,8 +29,8 @@ function snapshot(over: Partial<ConversationState> = {}): ConversationState {
   };
 }
 
-function turn(turnId: string, status: string, items: unknown[]) {
-  return [turnId, { turnId, status, items }];
+function turn(turnId: string, status: string, items: unknown[]): ConversationState["turnHistory"] extends never ? never : Record<string, { turnId: string; status: string; items: IpcTurnItem[] }> {
+  return { [turnId]: { turnId, status, items: items as IpcTurnItem[] } };
 }
 
 describe("快照规范化（2.2）", () => {
@@ -42,7 +42,7 @@ describe("快照规范化（2.2）", () => {
   test("未知 item 类型降级占位卡片", () => {
     const s = normalizeSnapshot(
       snapshot({
-        turnHistory: { history: { entitiesByKey: { [turn("t1", "completed", [{ type: "mcpToolCall", id: "x1" }])[0]!]: turn("t1", "completed", [{ type: "mcpToolCall", id: "x1" }])[1]! } } },
+        turnHistory: { history: { entitiesByKey: turn("t1", "completed", [{ type: "mcpToolCall", id: "x1" }]) } },
       }),
     );
     expect(s.turns[0]?.items[0]?.type).toBe("unknown");
@@ -102,13 +102,13 @@ describe("差分映射（2.2）", () => {
   test("命令执行 started → finished", () => {
     const s1 = normalizeSnapshot(
       snapshot({
-        turnHistory: { history: { entitiesByKey: { [turn("t1", "inProgress", [{ type: "commandExecution", command: "pnpm build", status: "inProgress" }])[0]!]: turn("t1", "inProgress", [{ type: "commandExecution", command: "pnpm build", status: "inProgress" }])[1]! } } },
+        turnHistory: { history: { entitiesByKey: turn("t1", "inProgress", [{ type: "commandExecution", command: "pnpm build", status: "inProgress" }]) } },
       }),
     );
     const s2 = normalizeSnapshot(
       snapshot({
         revision: 2,
-        turnHistory: { history: { entitiesByKey: { [turn("t1", "completed", [{ type: "commandExecution", command: "pnpm build", status: "completed", exitCode: 0, aggregatedOutput: "done" }])[0]!]: turn("t1", "completed", [{ type: "commandExecution", command: "pnpm build", status: "completed", exitCode: 0, aggregatedOutput: "done" }])[1]! } } },
+        turnHistory: { history: { entitiesByKey: turn("t1", "completed", [{ type: "commandExecution", command: "pnpm build", status: "completed", exitCode: 0, aggregatedOutput: "done" }]) } },
       }),
     );
     const facts = diffDesktopState(s1, s2);

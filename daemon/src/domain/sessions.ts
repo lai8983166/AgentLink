@@ -37,6 +37,45 @@ export class SessionRegistry {
   private live = new Map<string, LiveSession>();
   private rolloutIndex = new Map<string, SessionSummary>();
   private knownCodexThreads = new Set<string>();
+  /** 谱系：源会话 → 最新后代 id */
+  private descendantIndex = new Map<string, string>();
+  /** 桌面会话管理器（观察/接管），由装配层注入（任务 3.1） */
+  private desktop: {
+    observe(id: string, mode?: "observe" | "takeover"): Promise<void>;
+    takeover(id: string): Promise<void>;
+    has(id: string): boolean;
+    isTakenOver(id: string): boolean;
+    overlay(): Map<string, { status: SessionStatus | null; mode: string; desktopGone: boolean }>;
+    sendTurn(id: string, text: string, policy?: string): Promise<void>;
+    interrupt(id: string): Promise<void>;
+    /** 摘要变化回调（属性，由 registry 覆写接线） */
+    onSummaryChange: (id: string) => void;
+  } | null = null;
+
+  /** 注入桌面会话管理器并接线摘要联动 */
+  setDesktopManager(m: NonNullable<SessionRegistry["desktop"]>): void {
+    this.desktop = m;
+    m.onSummaryChange = (id) => {
+      // 桌面会话摘要变化 → 用合并后的摘要广播列表事件
+      const merged = this.mergeDesktopOverlay(id);
+      if (merged) this.bus.publishList({ type: "session.updated", summary: { ...merged } });
+    };
+  }
+
+  /** 合并桌面 overlay（观察状态/接管/owner 消失）到 rollout 摘要 */
+  private mergeDesktopOverlay(id: string): SessionSummary | null {
+    const base = this.rolloutIndex.get(id);
+    if (!base || !this.desktop) return base ?? null;
+    const ov = this.desktop.overlay().get(id);
+    if (!ov) return { ...base, desktopGone: false };
+    const takenOver = ov.mode === "takeover";
+    return {
+      ...base,
+      status: ov.status ?? base.status,
+      activeElsewhere: takenOver ? false : base.activeElsewhere,
+      desktopGone: ov.desktopGone,
+    };
+  }
 
   constructor(
     private readonly bridge: CodexBridge,
@@ -73,8 +112,15 @@ export class SessionRegistry {
   async list(): Promise<SessionSummary[]> {
     await this.refreshRollouts();
     const out = new Map<string, SessionSummary>();
-    for (const [id, s] of this.rolloutIndex) out.set(id, s);
+    for (const [id, s] of this.rolloutIndex) {
+      out.set(id, this.mergeDesktopOverlay(id) ?? s);
+    }
     for (const [id, s] of this.live) out.set(id, s.summary);
+    // 谱系标注：源会话 → 最新后代
+    for (const [id, s] of out) {
+      const desc = this.descendantIndex.get(id);
+      if (desc && !s.forkedToId && s.forkedFromId === null) s.forkedToId = desc;
+    }
     const order: Record<SessionStatus, number> = {
       waiting_approval: 0,
       running: 1,
@@ -120,11 +166,27 @@ export class SessionRegistry {
         status: "idle",
         activeElsewhere,
         activeVia,
+        forkedFromId: typeof t.forkedFromId === "string" ? t.forkedFromId : null,
+        forkedToId: null, // 后代关系在 list() 时统一计算
+        desktopGone: false,
         preview: t.preview ?? "",
         lastActivityAt,
         approvalPolicy: "on-request",
         pendingApprovals: 0,
       });
+    }
+    // 谱系后代索引：forkedFromId → 最新的后代（rollout + live 一并考虑）
+    this.descendantIndex = new Map();
+    const all = new Map<string, SessionSummary>();
+    for (const [id, s] of this.rolloutIndex) all.set(id, s);
+    for (const [id, s] of this.live) all.set(id, s.summary);
+    for (const [id, s] of all) {
+      if (s.forkedFromId) {
+        const prev = this.descendantIndex.get(s.forkedFromId);
+        if (!prev || s.lastActivityAt >= (all.get(prev)?.lastActivityAt ?? 0)) {
+          this.descendantIndex.set(s.forkedFromId, id);
+        }
+      }
     }
   }
 
@@ -154,6 +216,9 @@ export class SessionRegistry {
         status: "idle",
         activeElsewhere: false,
         activeVia: null,
+        forkedFromId: null,
+        forkedToId: null,
+        desktopGone: false,
         preview: "",
         lastActivityAt: 0,
         approvalPolicy: "on-request",
@@ -194,6 +259,9 @@ export class SessionRegistry {
       status: "running",
       activeElsewhere: false,
       activeVia: null,
+      forkedFromId: null,
+      forkedToId: null,
+      desktopGone: false,
       preview: opts.prompt,
       lastActivityAt: Date.now(),
       approvalPolicy: opts.approvalPolicy,
@@ -227,6 +295,14 @@ export class SessionRegistry {
   }
 
   async sendMessage(id: string, text: string): Promise<void> {
+    // 桌面接管态：委托 IPC follower（任务 3.3，含 clientUserMessageId 幂等）
+    if (this.desktop?.isTakenOver(id)) {
+      const policy = this.rolloutIndex.get(id)?.approvalPolicy ?? "on-request";
+      await this.desktop.sendTurn(id, text, policy);
+      const base = this.rolloutIndex.get(id);
+      if (base) base.lastActivityAt = Date.now();
+      return;
+    }
     this.ensureLive(id);
     const s = this.live.get(id)!;
     s.desiredPolicy = s.desiredPolicy ?? s.summary.approvalPolicy;
@@ -235,9 +311,69 @@ export class SessionRegistry {
   }
 
   async interrupt(id: string): Promise<void> {
+    if (this.desktop?.has(id)) {
+      if (this.desktop.isTakenOver(id)) {
+        await this.desktop.interrupt(id);
+        this.approvals.expireSession(id);
+        return;
+      }
+      throw new DaemonError("SESSION_BUSY", "会话正在电脑上使用中，先接管再中断");
+    }
     this.ensureLive(id);
     await this.bridge.turnInterrupt(id);
     this.approvals.expireSession(id);
+  }
+
+  /* ============ 桌面会话：观察 / 接管 / 兜底 fork（任务 3.1/3.2） ============ */
+
+  /** 观察桌面持有的会话（busy 会话实时流）；IPC 不可用抛出对应错误 */
+  async observe(id: string, mode: "observe" | "takeover" = "observe"): Promise<void> {
+    if (!this.desktop) throw new DaemonError("INTERNAL", "桌面 IPC 未启用");
+    await this.desktop.observe(id, mode);
+  }
+
+  async takeover(id: string): Promise<void> {
+    if (!this.desktop) throw new DaemonError("INTERNAL", "桌面 IPC 未启用");
+    await this.desktop.takeover(id);
+    const merged = this.mergeDesktopOverlay(id);
+    if (merged) this.bus.publishList({ type: "session.updated", summary: { ...merged } });
+  }
+
+  /** 兜底接力（owner 发现失败 / 管道不可用）：fork 出归本方管理的新会话 */
+  async fork(id: string, policy?: ApprovalPolicy): Promise<string> {
+    const p = policy ?? this.rolloutIndex.get(id)?.approvalPolicy ?? "on-request";
+    const thread = await this.bridge.threadFork(id, p);
+    const forkId = thread.id;
+    const envs = thread.environments ?? [];
+    const cwd = envs[0]?.cwd ?? this.rolloutIndex.get(id)?.cwd ?? "";
+    this.live.set(forkId, {
+      summary: {
+        id: forkId,
+        title: `接力 · ${this.rolloutIndex.get(id)?.title ?? "会话"}`.slice(0, 60),
+        cwd,
+        agent: "codex",
+        status: "idle",
+        activeElsewhere: false,
+        activeVia: null,
+        forkedFromId: id,
+        forkedToId: null,
+        desktopGone: false,
+        preview: "",
+        lastActivityAt: Date.now(),
+        approvalPolicy: p,
+        pendingApprovals: 0,
+      },
+      history: [],
+      tokenUsage: null,
+      desiredPolicy: p,
+      activity: null,
+    });
+    await this.refreshRollouts();
+    this.bus.publishList({
+      type: "session.created",
+      summary: { ...this.live.get(forkId)!.summary },
+    });
+    return forkId;
   }
 
   setPolicy(id: string, policy: ApprovalPolicy): void {
@@ -268,6 +404,9 @@ export class SessionRegistry {
             status: "running",
             activeElsewhere: false,
             activeVia: null,
+            forkedFromId: null,
+            forkedToId: null,
+            desktopGone: false,
             preview: "",
             lastActivityAt: Date.now(),
             approvalPolicy: "on-request",

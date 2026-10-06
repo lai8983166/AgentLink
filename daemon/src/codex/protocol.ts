@@ -10,6 +10,7 @@ export const CodexMethod = {
   threadStart: "thread/start",
   threadList: "thread/list",
   threadResume: "thread/resume",
+  threadFork: "thread/fork",
   threadRead: "thread/read",
   threadTurnsList: "thread/turns/list",
   turnStart: "turn/start",
