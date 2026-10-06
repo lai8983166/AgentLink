@@ -73,6 +73,8 @@ params: { kind:"command", threadId, turnId, itemId,
 
 ## 五、会话继承 & 单写者
 
+> 2026-10-06 补充：下述冲突是独立 app-server 恢复会话的限制，不能推导出只能 fork。已通过官方桌面本地 IPC follower 接口实测原会话发指令、状态同步、审批与中断，见 [接管验证记录](desktop-takeover-verification.md)。
+
 - 列表/恢复/读历史三级全部验证通过：VS Code（`source:"vscode"`）与 Codex Desktop 的会话和 CLI/app-server **共用 `~/.codex/sessions` rollout**，同一套 thread id。
 - ⚠️ **单写者**：会话若正被 VS Code / 桌面应用占用，`thread/resume` 报 `-32600 "already has an active writer"`。daemon 必须优雅处理：UI 显示"会话正在电脑上使用中"，或提示先在 IDE 关闭。
 - 附注：`codex migrate-rollouts` 可将 legacy rollout 迁到分页 thread history（本机已是新格式，未用到）。
@@ -112,3 +114,5 @@ params: { kind:"command", threadId, turnId, itemId,
 3. `thread/read` 不跨进程转发事件 → 协议层无外部会话实时通道
 4. **rollout 文件直读（watcher）是唯一实时桥梁**，数据完备
 5. `thread/fork` 可在 busy 会话上随时创建继承全部历史的新会话（writer 归调用方）→ 接力接管的官方通道
+
+> **更正（2026-10-06 晚）**：上文"rollout 是唯一实时桥梁"的结论**不成立**。`design/desktop-takeover-verification.md` 证实桌面端另有命名管道 IPC（`\.\pipe\codex-ipc`，4 字节小端长度前缀 + JSON），支持 `thread-owner-discovery` 发现会话拥有者 + follower 委托模式：外部客户端可对**原会话**（非 fork）发指令、收 snapshot/patches 实时同步、代批审批、中断——已在真实会话上全部实测通过。IPC 通道优先；rollout watcher 降级为管道不可用时的兜底；fork 降为 owner 发现失败时的兜底。注意：此为内部接口，桌面版升级需回归测试。
