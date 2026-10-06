@@ -105,6 +105,7 @@ export class IpcFollowerSession {
       this.log(`[follower] owner 变化 ${this.ownerClientId} → ${owner}`);
       this.ownerClientId = owner;
       this.lastState = null; // 换 owner 后重建快照基准
+      this.suppressNextDiff = true; // 下个快照只作基准（否则全量差分回流撑爆缓冲/重复卡片）
     }
     this.sendFollowing(true);
   }
@@ -139,7 +140,6 @@ export class IpcFollowerSession {
     if (process.env.AGENTLINK_DEBUG) {
       console.log(`[follower-dbg] conv=${this.conversationId.slice(0, 8)} suppress=${this.suppressNextDiff} change=${change.type} rev=${change.conversationState?.revision}`);
     }
-    const revision = change.revision ?? change.conversationState?.revision ?? null;
     if (change.type === "snapshot" && change.conversationState) {
       const next = normalizeSnapshot(change.conversationState);
       if (!revisionOk(this.lastState?.revision ?? null, next.revision)) {
@@ -148,17 +148,7 @@ export class IpcFollowerSession {
       }
       this.captureTemplate(change.conversationState);
       if (this.suppressNextDiff) {
-        this.suppressNextDiff = false;
-        // 基准快照：只发一条状态（供列表/横幅同步），历史由 detail 快照直出
-        this.lastState = next;
-        const status = next.requests.length > 0 ? "waiting_approval" : "idle";
-        this.onFacts([
-          {
-            kind: "session.status",
-            status: status as "waiting_approval" | "idle",
-            activity: next.requests[0]?.command ?? null,
-          },
-        ]);
+        this.takeBaseline(next);
         return;
       }
       this.emitFacts(diffDesktopState(this.lastState, next));
@@ -174,12 +164,33 @@ export class IpcFollowerSession {
         await this.resubscribe();
         return;
       }
+      if (this.suppressNextDiff) {
+        // 重订阅/换 owner 后首个到达的是增量（也带全量状态）：同样只作基准，避免整史回流
+        this.takeBaseline(next);
+        return;
+      }
       this.emitFacts(diffDesktopState(this.lastState, next));
       this.lastState = next;
       return;
     }
     // 无法解析的增量：重订阅换取权威快照
     await this.resubscribe();
+  }
+
+  /** 基准落位：只发历史重建信号 + 一条状态（供列表/横幅同步），历史由 detail 快照直出。
+   *  history.sync 让已在线的客户端重拉 detail——重订阅/换 owner 前的增量丢失由此收敛。 */
+  private takeBaseline(next: DesktopState): void {
+    this.suppressNextDiff = false;
+    this.lastState = next;
+    const status = next.requests.length > 0 ? "waiting_approval" : "idle";
+    this.onFacts([
+      { kind: "history.sync" },
+      {
+        kind: "session.status",
+        status: status as "waiting_approval" | "idle",
+        activity: next.requests[0]?.command ?? null,
+      },
+    ]);
   }
 
   private emitFacts(facts: DesktopFact[]): void {

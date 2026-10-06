@@ -214,6 +214,10 @@ export class DesktopSessionManager {
         case "agent.delta":
           this.bus.publish(conversationId, { type: "agent.delta", itemId: f.itemId, delta: f.delta });
           break;
+        case "history.sync":
+          // 基准快照落位（首跟/重订阅/换 owner）：客户端重拉 detail 拿权威历史
+          this.bus.publish(conversationId, { type: "history.sync" });
+          break;
         case "tool.started":
           this.bus.publish(conversationId, {
             type: "tool.started",

@@ -91,6 +91,10 @@ export const SessionEvent = z.discriminatedUnion("type", [
     type: z.literal("error"),
     message: z.string(),
   }),
+  EventBase.extend({
+    type: z.literal("history.sync"),
+    /** 权威历史已重建（基准快照落位）：客户端应重拉 detail 替换本地历史，避免增量丢失后停在部分文本 */
+  }),
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
