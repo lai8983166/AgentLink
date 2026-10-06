@@ -1,0 +1,285 @@
+import type {
+  ConversationState,
+  IpcPendingRequest,
+  IpcTurnItem,
+} from "./protocol";
+
+/**
+ * conversationState → 内部事件差分映射（任务 2.2/2.3）。
+ * 快照为权威状态；两次快照间按 turn/item/request 差分产出事件。
+ * 纯函数： Defensive 读取，未知 item 类型降级为占位卡片。
+ */
+
+export interface DesktopTurnItemState {
+  key: string;
+  type: string;
+  status: string | null;
+  text: string;
+  command: string | null;
+  outputTail: string | null;
+  exitCode: number | null;
+  added: number | null;
+  removed: number | null;
+}
+
+export interface DesktopTurnState {
+  turnId: string;
+  status: string;
+  items: DesktopTurnItemState[];
+}
+
+export interface DesktopRequestState {
+  id: string;
+  kind: "command" | "fileChange";
+  command: string | null;
+  cwd: string;
+  reason: string | null;
+  availableDecisions: Array<string | Record<string, unknown>>;
+}
+
+export interface DesktopState {
+  revision: number | null;
+  title: string;
+  turns: DesktopTurnState[];
+  requests: DesktopRequestState[];
+}
+
+/** 差分产出的事件（无 seq/at，由总线补齐） */
+export type DesktopFact =
+  | { kind: "session.status"; status: "running" | "waiting_approval" | "done" | "error" | "idle"; activity: string | null }
+  | { kind: "agent.message"; itemId: string; text: string }
+  | { kind: "agent.delta"; itemId: string; delta: string }
+  | { kind: "tool.started"; itemId: string; toolKind: "exec" | "fileChange"; target: string; cmd: string | null }
+  | {
+      kind: "tool.finished";
+      itemId: string;
+      toolKind: "exec" | "fileChange";
+      target: string;
+      exitCode: number | null;
+      added: number | null;
+      removed: number | null;
+      outputTail: string | null;
+    }
+  | {
+      kind: "approval.request";
+      requestId: string;
+      approvalKind: "command" | "fileChange";
+      command: string | null;
+      cwd: string;
+      reason: string | null;
+      availableDecisions: Array<string | Record<string, unknown>>;
+    }
+  | { kind: "approval.resolved"; requestId: string };
+
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+function itemKey(turnId: string, idx: number, item: IpcTurnItem): string {
+  return str(item.id) ?? `${turnId}:${idx}:${item.type ?? "?"}`;
+}
+
+function normalizeItem(turnId: string, idx: number, item: IpcTurnItem): DesktopTurnItemState | null {
+  const type = item.type ?? "";
+  if (type === "userMessage" || type === "reasoning") return null; // 用户消息桌面端自己有；reasoning v0 不渲染
+  const key = itemKey(turnId, idx, item);
+  const status = str(item.status);
+  if (type === "agentMessage") {
+    return {
+      key,
+      type,
+      status,
+      text: str(item.text) ?? "",
+      command: null,
+      outputTail: null,
+      exitCode: null,
+      added: null,
+      removed: null,
+    };
+  }
+  if (type === "commandExecution" || type === "shellCommand" || type === "custom_tool_call") {
+    const cmd = str(item.command) ?? "";
+    return {
+      key,
+      type: "commandExecution",
+      status,
+      text: "",
+      command: cmd || null,
+      outputTail: (() => {
+        const o = str(item.aggregatedOutput) ?? str(item.output);
+        return o && o.length > 4000 ? `${o.slice(0, 4000)}…` : o;
+      })(),
+      exitCode: num(item.exitCode) ?? num(item.exit_code),
+      added: null,
+      removed: null,
+    };
+  }
+  if (type === "fileChange" || type === "apply_patch") {
+    let added = 0;
+    let removed = 0;
+    const changes = item.changes;
+    if (Array.isArray(changes)) {
+      for (const ch of changes) {
+        added += num((ch as { added?: unknown }).added) ?? 0;
+        removed += num((ch as { removed?: unknown }).removed) ?? 0;
+      }
+    }
+    return {
+      key,
+      type: "fileChange",
+      status,
+      text: "",
+      command: null,
+      outputTail: null,
+      exitCode: null,
+      added,
+      removed,
+    };
+  }
+  // 未知类型：降级占位卡片（tool.started with generic target）
+  return {
+    key,
+    type: "unknown",
+    status,
+    text: str(item.text) ?? "",
+    command: null,
+    outputTail: null,
+    exitCode: null,
+    added: null,
+    removed: null,
+  };
+}
+
+function normalizeRequest(r: IpcPendingRequest): DesktopRequestState | null {
+  const id = str(r.id);
+  if (!id) return null;
+  const raw = JSON.stringify(r);
+  const isFile = /file|patch/i.test(str(r.kind) ?? "") || /fileChange/i.test(raw);
+  return {
+    id,
+    kind: isFile ? "fileChange" : "command",
+    command: str(r.command) ?? null,
+    cwd: str(r.cwd) ?? "",
+    reason: str(r.reason),
+    availableDecisions: Array.isArray(r.availableDecisions) ? r.availableDecisions : [],
+  };
+}
+
+export function normalizeSnapshot(cs: ConversationState): DesktopState {
+  const entities = cs.turnHistory?.history?.entitiesByKey ?? {};
+  const turns: DesktopTurnState[] = Object.entries(entities).map(([key, t]) => ({
+    turnId: str(t.turnId) ?? key,
+    status: str(t.status) ?? "unknown",
+    items: (t.items ?? [])
+      .map((it, idx) => normalizeItem(str(t.turnId) ?? key, idx, it))
+      .filter((x): x is DesktopTurnItemState => x !== null),
+  }));
+  const requests = (cs.requests ?? [])
+    .map(normalizeRequest)
+    .filter((x): x is DesktopRequestState => x !== null);
+  return {
+    revision: num(cs.revision),
+    title: str(cs.title) ?? "",
+    turns,
+    requests,
+  };
+}
+
+function turnStatusToFacts(next: DesktopState): DesktopFact {
+  const hasPending = next.requests.length > 0;
+  if (hasPending) return { kind: "session.status", status: "waiting_approval", activity: next.requests[0]?.command ?? "等待批准" };
+  const last = next.turns[next.turns.length - 1];
+  if (!last) return { kind: "session.status", status: "idle", activity: null };
+  if (last.status === "inProgress" || last.status === "running") return { kind: "session.status", status: "running", activity: null };
+  if (last.status === "failed" || last.status === "error") return { kind: "session.status", status: "error", activity: null };
+  if (last.status === "interrupted") return { kind: "session.status", status: "idle", activity: null };
+  return { kind: "session.status", status: "done", activity: null };
+}
+
+/** 差分：prev → next 产出事件序列 */
+export function diffDesktopState(prev: DesktopState | null, next: DesktopState): DesktopFact[] {
+  const facts: DesktopFact[] = [];
+  const prevTurns = new Map((prev?.turns ?? []).map((t) => [t.turnId, t]));
+  const seenItemKeys = new Set((prev?.turns ?? []).flatMap((t) => t.items.map((i) => i.key)));
+  const prevTextLen = new Map(
+    (prev?.turns ?? []).flatMap((t) => t.items.map((i) => [i.key, i.text.length] as const)),
+  );
+
+  for (const turn of next.turns) {
+    const prevTurn = prevTurns.get(turn.turnId);
+    for (const item of turn.items) {
+      const isNew = !seenItemKeys.has(item.key);
+      const prevLen = prevTextLen.get(item.key) ?? 0;
+
+      if (item.type === "agentMessage") {
+        if (isNew && item.text) {
+          facts.push({ kind: "agent.message", itemId: item.key, text: item.text });
+        } else if (item.text.length > prevLen) {
+          // 快照间文本增长 → 合成流式增量
+          facts.push({ kind: "agent.delta", itemId: item.key, delta: item.text.slice(prevLen) });
+          facts.push({ kind: "agent.message", itemId: item.key, text: item.text });
+        }
+        seenItemKeys.add(item.key);
+        continue;
+      }
+
+      const toolKind: "exec" | "fileChange" = item.type === "fileChange" ? "fileChange" : "exec";
+      const target =
+        toolKind === "exec" ? (item.command?.split(/\s+/)[0] ?? "命令") : (item.outputTail?.slice(0, 60) || "文件改动");
+      if (isNew) {
+        facts.push({
+          kind: "tool.started",
+          itemId: item.key,
+          toolKind,
+          target: item.type === "unknown" ? `未知操作(${item.type})` : target,
+          cmd: item.command,
+        });
+        seenItemKeys.add(item.key);
+      }
+      const wasFinished =
+        prevTurn?.items.find((i) => i.key === item.key)?.status !== "completed" && item.status === "completed";
+      const isFreshFinished = isNew && item.status === "completed";
+      if (wasFinished || isFreshFinished) {
+        facts.push({
+          kind: "tool.finished",
+          itemId: item.key,
+          toolKind,
+          target,
+          exitCode: item.exitCode,
+          added: item.added,
+          removed: item.removed,
+          outputTail: item.outputTail,
+        });
+      }
+    }
+  }
+
+  // requests 差分
+  const prevReq = new Map((prev?.requests ?? []).map((r) => [r.id, r]));
+  for (const r of next.requests) {
+    if (!prevReq.has(r.id)) {
+      facts.push({
+        kind: "approval.request",
+        requestId: r.id,
+        approvalKind: r.kind,
+        command: r.command,
+        cwd: r.cwd,
+        reason: r.reason,
+        availableDecisions: r.availableDecisions,
+      });
+    }
+  }
+  const nextReqIds = new Set(next.requests.map((r) => r.id));
+  for (const r of prev?.requests ?? []) {
+    if (!nextReqIds.has(r.id)) facts.push({ kind: "approval.resolved", requestId: r.id });
+  }
+
+  // 状态（放在末尾，保证 UI 先看到内容再看状态）
+  facts.push(turnStatusToFacts(next));
+  return facts;
+}
+
+/** revision 单调校验（任务 2.3）：返回 false 表示乱序/回退，应丢弃并重建 */
+export function revisionOk(prev: number | null, next: number | null): boolean {
+  if (prev === null || next === null) return true; // 无 revision 字段时以快照为准
+  return next > prev;
+}

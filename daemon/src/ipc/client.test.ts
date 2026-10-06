@@ -159,21 +159,26 @@ describe("IpcClient（任务 1.1/1.2）", () => {
 
 describe("对端信息落盘（任务 1.2）", () => {
   test("savePeerInfo/readPeerInfo 往返", () => {
-    const tmp = `${process.env.TEMP ?? "/tmp"}/agentlink-peer-${Date.now()}.json`;
-    process.env.USERPROFILE = undefined as unknown as string;
-    const orig = process.env.USERPROFILE;
-    // 用 HOME 指到临时目录，避免污染真实配置
-    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    const { mkdirSync, rmSync } = require("node:fs") as typeof import("node:fs");
     const home = `${process.env.TEMP ?? "/tmp"}/agentlink-home-${Date.now()}`;
     mkdirSync(home, { recursive: true });
-    process.env.HOME = home;
-    process.env.USERPROFILE = orig;
-    const { savePeerInfo, readPeerInfo } = require("./peer-info") as typeof import("./peer-info");
+    const origProfile = process.env.USERPROFILE;
+    const origHome = process.env.HOME;
+    process.env.USERPROFILE = home; // 单一赋值，无 undefined 窗口
+    const { savePeerInfo, readPeerInfo, peerInfoPath } = require("./peer-info") as typeof import("./peer-info");
     savePeerInfo({ codexCli: "0.160.0" });
+    // 路径须落在注入的 home 内（两边都用 join 归一，避免 /tmp 与 \tmp 差异）
+    const { join: joinPath } = require("node:path") as typeof import("node:path");
+    expect(peerInfoPath().startsWith(joinPath(home, ".agentlink"))).toBe(true);
     const read = readPeerInfo();
     expect(read?.peer).toMatchObject({ codexCli: "0.160.0" });
     expect(read?.at).toBeGreaterThan(0);
-    // 还原
-    process.env.HOME = undefined;
+    process.env.USERPROFILE = origProfile;
+    process.env.HOME = origHome;
+    try {
+      rmSync(home, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   });
 });
