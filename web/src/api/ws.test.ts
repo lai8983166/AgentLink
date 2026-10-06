@@ -91,6 +91,31 @@ describe("WsClient（任务 7.2）", () => {
     expect(sent).toContainEqual({ type: "subscribe", sessionId: "s1", lastSeq: null });
   });
 
+  test("心跳：无 pong 超时判假死，强制断开走重连", () => {
+    const { client, sockets } = setup();
+    // 20s 一跳：40s 内未到阈值不判死
+    vi.advanceTimersByTime(20_000);
+    expect(sockets[0]!.sent).toContainEqual(JSON.stringify({ type: "ping" }));
+    vi.advanceTimersByTime(20_000);
+    expect(client.state).toBe("open");
+    // 超过 45s 无 pong → 强制断开（FakeSocket.close 直接触发 onclose）
+    vi.advanceTimersByTime(20_000);
+    expect(client.state).toBe("closed");
+  });
+
+  test("心跳：pong 续期保持连接；probe 可立即判死", () => {
+    const { client, sockets } = setup();
+    for (let i = 0; i < 6; i++) {
+      vi.advanceTimersByTime(20_000);
+      sockets[0]!.serverSend({ type: "pong" });
+    }
+    expect(client.state).toBe("open");
+    // 页面后台恢复场景：时间流逝但心跳 timer 被节流未跑 → probe 立即判死
+    vi.setSystemTime(Date.now() + 120_000);
+    client.probe();
+    expect(client.state).toBe("closed");
+  });
+
   test("列表订阅与退订", () => {
     const { client, sockets } = setup();
     const seen: unknown[] = [];

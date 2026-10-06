@@ -27,4 +27,8 @@ export function connectWs(): void {
     }
   };
   ws.connect();
+  // 后台恢复（解锁手机回到 PWA）：立即探测假死连接，不等下一跳心跳
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") ws.probe();
+  });
 }
