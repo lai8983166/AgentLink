@@ -2,8 +2,8 @@
 
 ## 1. IPC 基础层
 
-- [ ] 1.1 实现 `ipc/client.ts`：命名管道连接、4 字节小端长度前缀分帧、request/response 匹配、broadcast 分发、client-discovery 自动回应、断线指数退避重连；注入假 socket 的单测覆盖分帧与重连
-- [ ] 1.2 实现 initialize/version 握手与对端版本记录（日志 + `~/.agentlink/` 状态文件），单测验证版本字段落盘
+- [x] 1.1 实现 `ipc/client.ts`：命名管道连接、4 字节小端长度前缀分帧、request/response 匹配、broadcast 分发、client-discovery 自动回应、断线指数退避重连；注入假 socket 的单测覆盖分帧与重连
+- [x] 1.2 实现 initialize/version 握手与对端版本记录（日志 + `~/.agentlink/` 状态文件），单测验证版本字段落盘
 
 ## 2. Follower 会话层
 
