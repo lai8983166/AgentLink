@@ -186,7 +186,18 @@ export class IpcClient {
 
   call<T = unknown>(method: string, params?: unknown, targetClientId?: string): Promise<T> {
     return this.callFull(method, params, targetClientId).then((r) => {
-      if (r.error) throw new Error(`ipc error ${method}: ${r.error.message ?? "unknown"}`);
+      if (r.error) {
+        // 桌面 IPC 的 error 可能是字符串或 {message}
+        const msg = typeof r.error === "string" ? r.error : ((r.error as { message?: string }).message ?? JSON.stringify(r.error));
+        throw new Error(`ipc error ${method}: ${msg}`);
+      }
+      // 顶层 resultType=error 的响应也按错误处理（steer 探测实测形态）
+      const rt = (r as { resultType?: string }).resultType;
+      if (rt === "error") {
+        const e = (r as { error?: unknown }).error;
+        const msg = typeof e === "string" ? e : JSON.stringify(e ?? rt);
+        throw new Error(`ipc error ${method}: ${msg}`);
+      }
       return r.result as T;
     });
   }

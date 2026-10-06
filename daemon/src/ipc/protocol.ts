@@ -83,6 +83,8 @@ export interface ConversationState {
           turnId?: string;
           status?: string;
           items?: IpcTurnItem[];
+          /** 原始轮次请求参数（start-turn 模板，实测字段） */
+          params?: Record<string, unknown>;
           [k: string]: unknown;
         }
       >;
