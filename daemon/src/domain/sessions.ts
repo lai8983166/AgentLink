@@ -55,6 +55,12 @@ export class SessionRegistry {
     /** 摘要变化回调（属性，由 registry 覆写接线） */
     onSummaryChange: (id: string) => void;
   } | null = null;
+  /** 账户限额监控（app-server 通知路径），装配层注入 */
+  private limits: import("./limits").LimitsMonitor | null = null;
+
+  setLimitsMonitor(m: import("./limits").LimitsMonitor): void {
+    this.limits = m;
+  }
 
   /** 注入桌面会话管理器并接线摘要联动 */
   setDesktopManager(m: NonNullable<SessionRegistry["desktop"]>): void {
@@ -612,7 +618,12 @@ export class SessionRegistry {
           outputTokens: f.outputTokens,
         };
         if (s) s.tokenUsage = usage;
+        if (f.rateLimits && this.limits) this.limits.ingest(f.rateLimits.primary, f.rateLimits.secondary);
         this.bus.publish(f.threadId, { type: "usage.updated", tokenUsage: usage, rateLimits: null });
+        return;
+      }
+      case "accountRateLimits": {
+        if (this.limits) this.limits.ingest(f.rateLimits.primary, f.rateLimits.secondary);
         return;
       }
       case "approvalRequest": {

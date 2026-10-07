@@ -11,6 +11,7 @@ import { SessionEventBus } from "./events/bus";
 import { AuditStore } from "./domain/audit";
 import { ApprovalService } from "./domain/approvals";
 import { SessionRegistry } from "./domain/sessions";
+import { LimitsMonitor } from "./domain/limits";
 import { FsService } from "./domain/fs";
 import { DesktopSessionManager } from "./ipc/desktop-manager";
 import { NtfyGateway, type NtfyConfig } from "./notify/ntfy";
@@ -52,10 +53,16 @@ export function createApp(opts: {
   const fs = new FsService(opts.allowedRoots);
   const registry = new SessionRegistry(opts.bridge, bus, approvals, fs);
 
+  // 账户限额（app-server 通知 + 桌面会话 rollout 尾读）：状态 pill / 用尽告警
+  const limits = new LimitsMonitor();
+  limits.onChange = (l) => bus.publishList({ type: "account.limits", limits: l });
+  registry.setLimitsMonitor(limits);
+
   // 桌面 IPC follower（任务 3.1）：观察/接管桌面持有会话
   const desktop = new DesktopSessionManager(bus, approvals, {
     log: (...a: unknown[]) => console.log("[desktop]", ...a),
   });
+  desktop.limitsMonitor = limits;
   approvals.desktopDelegate = {
     decide: (sessionId, requestId, decision) => desktop.decide(sessionId, requestId, decision),
   };
@@ -64,7 +71,7 @@ export function createApp(opts: {
   // REST
   app.route(
     "/",
-    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth, desktop }),
+    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth, desktop, limits }),
   );
 
   // token 轮换（remote-access spec：轮换后旧 token 立即失效）
@@ -82,6 +89,7 @@ export function createApp(opts: {
     opts.ntfy ?? { enabled: false, url: "", topicPrefix: "agentlink", clickBase: "" },
   );
   approvals.onRequest((a) => ntfy.approvalRequest(a));
+  limits.onExhausted = (window, w) => ntfy.quotaExhausted(window, w.resetsAt);
   bus.tap((e) => {
     if ("type" in e) ntfy.onEvent(e as Parameters<typeof ntfy.onEvent>[0]);
   });

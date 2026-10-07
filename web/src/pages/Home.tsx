@@ -30,9 +30,16 @@ export function Home() {
     refetchInterval: 15000,
   });
 
-  // 列表级事件：增量更新缓存（WS 驱动，轮询兜底）
+  // 列表级事件：增量更新缓存（WS 驱动，轮询兜底）；账户限额 → 状态缓存
   useEffect(() => {
     return ws.subscribeList((e: ListEvent) => {
+      if (e.type === "account.limits") {
+        queryClient.setQueryData(["status"], (old: unknown) =>
+          old ? { ...(old as object), rateLimits: e.limits } : old,
+        );
+        return;
+      }
+      if (!("summary" in e)) return;
       queryClient.setQueryData(["sessions"], (old: { sessions: SessionSummary[] } | undefined) => {
         if (!old) return old;
         const list = [...old.sessions];
@@ -84,7 +91,22 @@ export function Home() {
           >
             <span style={{ color: wsConnected ? "var(--green)" : "var(--red)" }}>●</span>
             家里PC · {wsConnected ? "已连接" : "连接中…"}
-            {rate ? ` · 额度 ${rate.usedPercent}%` : ""}
+            {rate &&
+              (() => {
+                const p5 = Math.round(rate.primary.usedPercent);
+                const sec = rate.secondary;
+                const wk = sec ? Math.round(sec.usedPercent) : null;
+                const weekFull = wk != null && wk >= 99;
+                const full = p5 >= 99 || weekFull;
+                const resetAt = new Date((weekFull && sec ? sec : rate.primary).resetsAt * 1000);
+                const hhmm = `${String(resetAt.getHours()).padStart(2, "0")}:${String(resetAt.getMinutes()).padStart(2, "0")}`;
+                return (
+                  <span style={full ? { color: "var(--red)", fontWeight: 700 } : undefined}>
+                    {" · "}
+                    {full ? `额度用尽 ${hhmm} 重置` : `额度 ${p5}%${wk != null ? ` / 周 ${wk}%` : ""}`}
+                  </span>
+                );
+              })()}
           </div>
         </div>
         <Link to="/settings" className="icon-btn">

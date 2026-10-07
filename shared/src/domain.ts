@@ -44,12 +44,20 @@ export const TokenUsage = z.object({
 });
 export type TokenUsage = z.infer<typeof TokenUsage>;
 
-/** 账户限额（来自 account/rateLimits/updated） */
-export const RateLimit = z.object({
+/** 限额窗口（来自 account/rateLimits/updated / rollout token_usage_record.rate_limits） */
+export const RateLimitWindow = z.object({
   usedPercent: z.number(),
   windowDurationMins: z.number(),
   resetsAt: z.number(),
 });
+export type RateLimitWindow = z.infer<typeof RateLimitWindow>;
+
+/** 账户限额：primary=5 小时窗，secondary=周窗 */
+export const RateLimits = z.object({
+  primary: RateLimitWindow,
+  secondary: RateLimitWindow.nullable(),
+});
+export const RateLimit = RateLimits;
 export type RateLimit = z.infer<typeof RateLimit>;
 
 /** 会话卡片（首页列表条目） */

@@ -3,7 +3,7 @@ import {
   ApprovalDecision,
   ApprovalKind,
   DiffStat,
-  RateLimit,
+  RateLimits,
   SessionStatus,
   SessionSummary,
   TokenUsage,
@@ -85,7 +85,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   EventBase.extend({
     type: z.literal("usage.updated"),
     tokenUsage: TokenUsage.nullable(),
-    rateLimits: RateLimit.nullable(),
+    rateLimits: RateLimits.nullable(),
   }),
   EventBase.extend({
     type: z.literal("error"),
@@ -111,6 +111,11 @@ export const ListEvent = z.discriminatedUnion("type", [
   EventBase.extend({
     type: z.literal("session.deleted"),
     summary: SessionSummary,
+  }),
+  /** 账户限额变化（额度用尽告警由客户端/ntfy 按此触发） */
+  EventBase.extend({
+    type: z.literal("account.limits"),
+    limits: RateLimits,
   }),
 ]);
 export type ListEvent = z.infer<typeof ListEvent>;

@@ -31,6 +31,7 @@ export function Session() {
   const [approvals, setApprovals] = useState(new Map<string, { req: PendingApprovalUI; resolved: { decision: string } | null }>());
   const [liveStatus, setLiveStatus] = useState<{ status: string; activity: string | null } | null>(null);
   const [takenOver, setTakenOver] = useState(false);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   const detailQ = useQuery({
     queryKey: ["session", sessionId],
@@ -132,6 +133,10 @@ export function Session() {
       });
       return;
     }
+    if (e.type === "error") {
+      setErrorBanner(e.message);
+      return;
+    }
     if (e.type === "history.sync") {
       // 权威历史已重建（基准快照落位）：重拉 detail，收敛增量丢失造成的部分文本
       queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
@@ -231,6 +236,14 @@ export function Session() {
           <span>⏳</span>
           <span style={{ flex: 1 }}>{busyError}</span>
           <Link to="/" style={{ color: "var(--red)", fontWeight: 700, textDecoration: "underline dotted" }}>返回列表</Link>
+        </div>
+      )}
+
+      {errorBanner && (
+        <div style={{ background: "var(--red-bg)", borderBottom: "1.5px solid var(--border)", padding: "10px 16px", fontSize: 12.5, color: "var(--red)", display: "flex", gap: 8, alignItems: "center" }}>
+          <span>⚠️</span>
+          <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 11.5, wordBreak: "break-all" }}>{errorBanner}</span>
+          <span style={{ cursor: "pointer", fontWeight: 700 }} onClick={() => setErrorBanner(null)}>✕</span>
         </div>
       )}
 
