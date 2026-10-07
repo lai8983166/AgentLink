@@ -65,6 +65,20 @@ export class NtfyGateway {
     }
   }
 
+  /** 账户额度用尽通知（LimitsMonitor 上升沿触发；去重在监控侧，按 resetsAt） */
+  quotaExhausted(window: "5h" | "week", resetsAt: number): void {
+    if (!this.cfg.enabled) return;
+    const at = new Date(resetsAt * 1000);
+    const hhmm = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+    this.publish(`${this.cfg.topicPrefix}-task`, {
+      title: window === "5h" ? "⏳ 5 小时额度已用尽" : "⏳ 周额度已用尽",
+      body: window === "5h" ? `约 ${hhmm} 重置，重置前新任务会被拒` : `约 ${hhmm} 重置（周窗口）`,
+      priority: 4,
+      tags: "hourglass",
+      click: this.cfg.clickBase ? this.cfg.clickBase.replace(/\/$/, "") : undefined,
+    });
+  }
+
   private deepLink(sessionId: string, approvalId?: string): string | undefined {
     if (!this.cfg.clickBase) return undefined;
     const base = this.cfg.clickBase.replace(/\/$/, "");

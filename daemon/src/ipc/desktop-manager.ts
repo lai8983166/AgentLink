@@ -1,6 +1,7 @@
 import type { SessionStatus } from "@agentlink/shared";
 import { IpcClient } from "./client";
 import { IpcMethod } from "./protocol";
+import { rolloutLimits } from "./rollout-limits";
 import { IpcFollowerSession, type FollowerMode } from "./follower";
 import type { DesktopFact } from "./mapper";
 import type { SessionEventBus } from "../events/bus";
@@ -26,6 +27,8 @@ export class DesktopSessionManager {
 
   /** registry 注入：桌面会话摘要变化时重发合并后的列表事件 */
   onSummaryChange: (conversationId: string) => void = () => {};
+  /** 账户限额监控（rollout 尾读路径），装配层注入；未注入则不轮询 */
+  limitsMonitor: import("../domain/limits").LimitsMonitor | null = null;
 
   constructor(
     private readonly bus: SessionEventBus,
@@ -94,6 +97,24 @@ export class DesktopSessionManager {
     };
     this.sessions.set(conversationId, follower);
     await follower.start();
+    this.startLimitsPolling(conversationId);
+  }
+
+  /** 桌面会话的账户限额：IPC 快照不含 rate_limits，从 rollout 文件尾读（60s） */
+  private limitsTimers = new Map<string, ReturnType<typeof setInterval>>();
+  private startLimitsPolling(conversationId: string): void {
+    if (!this.limitsMonitor || this.limitsTimers.has(conversationId)) return;
+    const poll = () => {
+      const rl = rolloutLimits(conversationId);
+      if (rl) this.limitsMonitor?.ingest(rl.primary, rl.secondary);
+    };
+    poll();
+    this.limitsTimers.set(conversationId, setInterval(poll, 60_000));
+  }
+  private stopLimitsPolling(conversationId: string): void {
+    const t = this.limitsTimers.get(conversationId);
+    if (t) clearInterval(t);
+    this.limitsTimers.delete(conversationId);
   }
 
   async takeover(conversationId: string): Promise<void> {
@@ -139,9 +160,11 @@ export class DesktopSessionManager {
   stop(conversationId: string): void {
     this.sessions.get(conversationId)?.stop();
     this.sessions.delete(conversationId);
+    this.stopLimitsPolling(conversationId);
   }
 
-  /** 接管态发消息（任务 3.3）：clientUserMessageId 幂等（60s 内同文本重试复用） */
+  /** 接管态发消息（任务 3.3）：clientUserMessageId 幂等（60s 内同文本重试复用）。
+   *  失败（额度用尽/桌面拒绝等）→ error 事件让手机立刻看到原因，而不是静默恢复输入框 */
   async sendTurn(conversationId: string, text: string, approvalPolicy?: string): Promise<void> {
     const f = this.sessions.get(conversationId);
     if (!f || f.mode !== "takeover") throw new Error("IPC_NOT_TAKEN_OVER: 会话未接管");
@@ -150,7 +173,13 @@ export class DesktopSessionManager {
     const reuse = prev && now - prev.at < 60_000 && prev.text === text ? prev.id : undefined;
     const id = reuse ?? crypto.randomUUID();
     this.lastSend.set(conversationId, { id, text, at: now });
-    await f.startTurn({ text, clientUserMessageId: id, approvalPolicy });
+    try {
+      await f.startTurn({ text, clientUserMessageId: id, approvalPolicy });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.bus.publish(conversationId, { type: "error", message: `指令发送失败：${msg}` });
+      throw e;
+    }
   }
 
   async interrupt(conversationId: string): Promise<void> {

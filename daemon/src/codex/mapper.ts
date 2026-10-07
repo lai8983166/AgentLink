@@ -1,4 +1,4 @@
-import type { SessionStatus, ToolKind } from "@agentlink/shared";
+import type { RateLimitWindow, SessionStatus, ToolKind } from "@agentlink/shared";
 import {
   CODEX_NOISE_METHODS,
   type CodexApprovalParams,
@@ -36,7 +36,8 @@ export type MappedFact =
   | { kind: "queueChanged"; threadId: string; queued: number }
   | { kind: "patchUpdated"; threadId: string; itemId: string; patch: string | null }
   | { kind: "turnCompleted"; threadId: string; error: string | null }
-  | { kind: "tokenUsage"; threadId: string; totalTokens: number; inputTokens: number; cachedInputTokens: number; outputTokens: number }
+  | { kind: "tokenUsage"; threadId: string; totalTokens: number; inputTokens: number; cachedInputTokens: number; outputTokens: number; rateLimits: { primary: RateLimitWindow; secondary: RateLimitWindow | null } | null }
+  | { kind: "accountRateLimits"; threadId: string; rateLimits: { primary: RateLimitWindow; secondary: RateLimitWindow | null } }
   | {
       kind: "approvalRequest";
       rpcId: number | string;
@@ -56,6 +57,24 @@ function str(v: unknown): string | null {
 }
 function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** rate_limits 防御解析（rollout/通知实测 snake_case，部分通知 camelCase） */
+export function parseRateLimits(v: unknown): { primary: RateLimitWindow; secondary: RateLimitWindow | null } | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const win = (x: unknown): RateLimitWindow | null => {
+    if (!x || typeof x !== "object") return null;
+    const w = x as Record<string, unknown>;
+    const used = num(w.used_percent) ?? num(w.usedPercent);
+    const mins = num(w.window_minutes) ?? num(w.windowMinutes) ?? num(w.windowDurationMins);
+    const resets = num(w.resets_at) ?? num(w.resetsAt);
+    if (used == null || mins == null || resets == null) return null;
+    return { usedPercent: used, windowDurationMins: mins, resetsAt: resets };
+  };
+  const primary = win(o.primary);
+  if (!primary) return null;
+  return { primary, secondary: win(o.secondary) };
 }
 
 function statusFromThreadStatus(s: CodexThreadStatus | undefined): SessionStatus | null {
@@ -97,6 +116,12 @@ function textFromContent(content: unknown): string {
 export function mapNotification(n: CodexNotification): MappedFact | null {
   if (CODEX_NOISE_METHODS.has(n.method)) return null;
   const p = (n.params ?? {}) as Record<string, unknown>;
+  // 账户级通知（无 threadId）：在 threadId 守卫前拦截
+  if (n.method === "account/rateLimits/updated") {
+    const rl = parseRateLimits(p.rateLimits ?? p.rate_limits ?? (p as Record<string, unknown>));
+    if (rl) return { kind: "accountRateLimits", threadId: "", rateLimits: rl };
+    return null;
+  }
   const threadId = str(p.threadId);
   if (!threadId) return null;
 
@@ -197,6 +222,7 @@ export function mapNotification(n: CodexNotification): MappedFact | null {
         inputTokens: num(total.inputTokens) ?? 0,
         cachedInputTokens: num(total.cachedInputTokens) ?? 0,
         outputTokens: num(total.outputTokens) ?? 0,
+        rateLimits: parseRateLimits(u.rate_limits ?? u.rateLimits ?? p.rate_limits ?? p.rateLimits),
       };
     }
     default:
