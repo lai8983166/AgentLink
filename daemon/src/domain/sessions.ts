@@ -50,6 +50,8 @@ export class SessionRegistry {
     interrupt(id: string): Promise<void>;
     /** 观察中会话的快照历史（完整直出，避免 diff 事件重复/截断） */
     historyFor(id: string): import("@agentlink/shared").HistoryItem[] | null;
+    /** 桌面/VS Code 当前是否持有该会话（IPC owner 发现；管道不可用返回 false 走原逻辑） */
+    ownerAlive?(id: string): Promise<boolean>;
     /** 摘要变化回调（属性，由 registry 覆写接线） */
     onSummaryChange: (id: string) => void;
   } | null = null;
@@ -294,6 +296,12 @@ export class SessionRegistry {
 
   async resume(id: string, policy?: ApprovalPolicy): Promise<SessionDetail> {
     const desired = policy ?? this.live.get(id)?.desiredPolicy ?? "on-request";
+    // 5 分钟时间戳启发式不可靠：桌面会话闲置时不报 busy，直接 resume 会把写权抢过来，
+    // 桌面端被锁成只读（"已在另一个应用中打开"）。先问 IPC 谁持有，桌面/VS Code
+    // 在持有 → 走 SESSION_BUSY，客户端既有逻辑会自动转观察模式。
+    if (this.desktop?.ownerAlive && (await this.desktop.ownerAlive(id))) {
+      throw new DaemonError("SESSION_BUSY", "会话正在电脑端打开中（桌面/VS Code 持有），已转观察模式");
+    }
     // 单写者冲突在这里抛 SESSION_BUSY（bridge 映射）
     await this.bridge.threadResume(id, desired);
     const { session } = await this.detail(id);

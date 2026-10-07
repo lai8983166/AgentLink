@@ -1,5 +1,6 @@
 import type { SessionStatus } from "@agentlink/shared";
 import { IpcClient } from "./client";
+import { IpcMethod } from "./protocol";
 import { IpcFollowerSession, type FollowerMode } from "./follower";
 import type { DesktopFact } from "./mapper";
 import type { SessionEventBus } from "../events/bus";
@@ -103,6 +104,23 @@ export class DesktopSessionManager {
 
   has(conversationId: string): boolean {
     return this.sessions.has(conversationId);
+  }
+
+  /** 桌面/VS Code 当前是否持有该会话（IPC owner 发现）。
+   *  管道未连接/发现失败/无 owner → false（调用方回落原逻辑）。
+   *  与 5 分钟时间戳启发式相比这是权威信号，可防止误抢闲置桌面会话的写权。 */
+  async ownerAlive(conversationId: string): Promise<boolean> {
+    if (this.client && this.client.state !== "open") return false; // 管道已知断开
+    try {
+      const client = this.ensureClient();
+      const res = (await client.callFull(IpcMethod.threadOwnerDiscovery, {
+        hostId: "local",
+        conversationId,
+      })) as { resultType?: string; handledByClientId?: string; error?: { message?: string } };
+      return !res.error && res.resultType === "success" && !!res.handledByClientId;
+    } catch {
+      return false;
+    }
   }
 
   isTakenOver(conversationId: string): boolean {

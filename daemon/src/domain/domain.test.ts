@@ -128,6 +128,32 @@ describe("SessionRegistry 状态机", () => {
     }
   });
 
+  test("resume：IPC 发现在桌面持有 → 不抢写权直接 SESSION_BUSY；无 owner 正常恢复", async () => {
+    const { reg } = await setup();
+    let ownerAlive = true;
+    reg.setDesktopManager({
+      observe: async () => {},
+      takeover: async () => {},
+      has: () => false,
+      isTakenOver: () => false,
+      overlay: () => new Map(),
+      sendTurn: async () => {},
+      interrupt: async () => {},
+      historyFor: () => null,
+      ownerAlive: async () => ownerAlive,
+      onSummaryChange: () => {},
+    });
+    try {
+      await reg.resume("old1"); // app-server 侧本可恢复成功，但桌面在持有 → 拒绝
+      expect.unreachable();
+    } catch (e) {
+      expect(e instanceof DaemonError && e.code).toBe("SESSION_BUSY");
+    }
+    ownerAlive = false;
+    const detail = await reg.resume("old1");
+    expect(detail.id).toBe("old1");
+  });
+
   test("create：白名单外路径拒绝", async () => {
     const { reg } = await setup();
     try {
