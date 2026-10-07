@@ -171,7 +171,7 @@ export class SessionRegistry {
         forkedFromId: typeof t.forkedFromId === "string" ? t.forkedFromId : null,
         forkedToId: null, // 后代关系在 list() 时统一计算
         desktopGone: false,
-        preview: t.preview ?? "",
+        preview: typeof t.preview === "string" ? t.preview.slice(0, 120) : "",
         lastActivityAt,
         approvalPolicy: "on-request",
         pendingApprovals: 0,
@@ -297,10 +297,13 @@ export class SessionRegistry {
     // 单写者冲突在这里抛 SESSION_BUSY（bridge 映射）
     await this.bridge.threadResume(id, desired);
     const { session } = await this.detail(id);
+    // summary 只留摘要字段：detail 的 history/tokenUsage 不能混入，
+    // 否则列表接口与列表推送会被撑到 MB 级（外网下首页 15s 轮询灾难）
+    const { history, tokenUsage, ...summaryBase } = session;
     this.live.set(id, {
-      summary: { ...session, status: "idle", approvalPolicy: desired, pendingApprovals: 0 },
-      history: session.history,
-      tokenUsage: null,
+      summary: { ...summaryBase, status: "idle", approvalPolicy: desired, pendingApprovals: 0 },
+      history,
+      tokenUsage: tokenUsage ?? null,
       desiredPolicy: desired,
       activity: null,
     });
