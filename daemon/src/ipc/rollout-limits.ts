@@ -47,8 +47,10 @@ function parseWindow(v: unknown): RateLimitWindow | null {
   return { usedPercent: used, windowDurationMins: mins, resetsAt: resets };
 }
 
-/** 读文件尾部，提取最后一条 rate_limits（primary 5h / secondary 周） */
-export function tailRateLimits(path: string): { primary: RateLimitWindow; secondary: RateLimitWindow | null } | null {
+/** 读文件尾部，提取最后一条 rate_limits（primary 5h / secondary 周）+ 记录时间 */
+export function tailRateLimits(
+  path: string,
+): { primary: RateLimitWindow; secondary: RateLimitWindow | null; measuredAt: number | null } | null {
   let fd: number | null = null;
   try {
     const size = statSync(path).size;
@@ -61,6 +63,7 @@ export function tailRateLimits(path: string): { primary: RateLimitWindow; second
     const lines = buf.toString("utf8").split("\n");
     if (start > 0 && lines[0] !== undefined) lines.shift(); // 前半截行丢弃
     let last: { primary?: unknown; secondary?: unknown } | null = null;
+    let measuredAt: number | null = null;
     for (let i = lines.length - 1; i >= 0; i--) {
       const l = lines[i];
       if (!l || !l.includes("rate_limits")) continue;
@@ -72,6 +75,11 @@ export function tailRateLimits(path: string): { primary: RateLimitWindow; second
           | undefined;
         if (rl) {
           last = rl;
+          const ts = rec.timestamp;
+          if (typeof ts === "string") {
+            const t = Date.parse(ts);
+            if (Number.isFinite(t)) measuredAt = t;
+          }
           break;
         }
       } catch {
@@ -81,7 +89,7 @@ export function tailRateLimits(path: string): { primary: RateLimitWindow; second
     if (!last) return null;
     const primary = parseWindow(last.primary);
     if (!primary) return null;
-    return { primary, secondary: parseWindow(last.secondary) };
+    return { primary, secondary: parseWindow(last.secondary), measuredAt };
   } catch {
     return null;
   } finally {
@@ -89,8 +97,47 @@ export function tailRateLimits(path: string): { primary: RateLimitWindow; second
   }
 }
 
+export type RolloutLimits = NonNullable<ReturnType<typeof tailRateLimits>>;
+
+/** 合并多条来源：按 (resetsAt, usedPercent) 取各窗口最新值（同窗口内用量单调增，值大者新） */
+export function mergeLimits(a: RolloutLimits | null, b: RolloutLimits | null): RolloutLimits | null {
+  if (!a) return b;
+  if (!b) return a;
+  const pick = (x: RateLimitWindow, y: RateLimitWindow) =>
+    y.resetsAt > x.resetsAt || (y.resetsAt === x.resetsAt && y.usedPercent > x.usedPercent) ? y : x;
+  const secondary = [a.secondary, b.secondary].filter((w): w is RateLimitWindow => w !== null);
+  return {
+    primary: pick(a.primary, b.primary),
+    secondary: secondary.length ? secondary.reduce((acc, w) => pick(acc, w)) : null,
+    measuredAt: Math.max(a.measuredAt ?? 0, b.measuredAt ?? 0) || null,
+  };
+}
+
+/** 观察中会话 + 全局最近活跃的 rollout（最多 2 个）合并取最新——账户级额度，别的会话干活也算 */
+export function recentLimits(conversationId: string, sessionsRoot = join(homedir(), ".codex", "sessions")): RolloutLimits | null {
+  const candidates = new Set<string>();
+  const observed = findRollout(conversationId, sessionsRoot);
+  if (observed) candidates.add(observed);
+  try {
+    if (existsSync(sessionsRoot)) {
+      const files = readdirSync(sessionsRoot, { recursive: true, encoding: "utf8" }) as string[];
+      const hot = files
+        .filter((f) => f.endsWith(".jsonl"))
+        .map((f) => ({ f, m: statSync(join(sessionsRoot, f)).mtimeMs }))
+        .sort((x, y) => y.m - x.m)
+        .slice(0, 2);
+      for (const h of hot) candidates.add(join(sessionsRoot, h.f));
+    }
+  } catch {
+    // 目录扫描失败不影响被观察会话的读取
+  }
+  let out: RolloutLimits | null = null;
+  for (const p of candidates) out = mergeLimits(out, tailRateLimits(p));
+  return out;
+}
+
 /** 组合入口：会话 → 最新限额（找不到 rollout 或无记录返回 null） */
-export function rolloutLimits(conversationId: string): { primary: RateLimitWindow; secondary: RateLimitWindow | null } | null {
+export function rolloutLimits(conversationId: string): RolloutLimits | null {
   const path = findRollout(conversationId);
   if (!path) return null;
   return tailRateLimits(path);

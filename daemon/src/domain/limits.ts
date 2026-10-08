@@ -8,6 +8,8 @@ import type { RateLimitWindow } from "@agentlink/shared";
 export interface LimitsState {
   primary: RateLimitWindow;
   secondary: RateLimitWindow | null;
+  /** 本次数据的测量时刻（rollout 记录时间；用于 UI 标注新鲜度） */
+  measuredAt: number | null;
 }
 
 const EXHAUSTED_PCT = 99.5;
@@ -28,24 +30,24 @@ export class LimitsMonitor {
     // 过期窗口不再展示为"当前"（reset 时间已过 10 分钟且没有新数据 → 视为陈旧）
     const now = Date.now() / 1000;
     if (c.primary.resetsAt > now - 600) return c;
-    if (c.secondary && c.secondary.resetsAt > now - 600) return { primary: c.secondary, secondary: null };
+    if (c.secondary && c.secondary.resetsAt > now - 600) return { primary: c.secondary, secondary: null, measuredAt: c.measuredAt };
     return null;
   }
 
-  ingest(primary: RateLimitWindow, secondary: RateLimitWindow | null): void {
+  ingest(primary: RateLimitWindow, secondary: RateLimitWindow | null, measuredAt: number | null = null): void {
     const prev = this.current;
     // 只前进：resetsAt 更新或百分比变化的才视为新数据（防旧文件尾读回退）
     if (prev && primary.resetsAt === prev.primary.resetsAt && primary.usedPercent < prev.primary.usedPercent) {
       return;
     }
-    this.current = { primary, secondary };
+    this.current = { primary, secondary, measuredAt };
     if (
       !prev ||
       primary.usedPercent !== prev.primary.usedPercent ||
       secondary?.usedPercent !== prev.secondary?.usedPercent ||
       primary.resetsAt !== prev.primary.resetsAt
     ) {
-      this.onChange({ primary, secondary });
+      this.onChange({ primary, secondary, measuredAt });
     }
     this.checkExhausted("5h", primary);
     if (secondary) this.checkExhausted("week", secondary);

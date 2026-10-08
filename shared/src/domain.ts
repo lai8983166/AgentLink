@@ -56,6 +56,8 @@ export type RateLimitWindow = z.infer<typeof RateLimitWindow>;
 export const RateLimits = z.object({
   primary: RateLimitWindow,
   secondary: RateLimitWindow.nullable(),
+  /** 数据测量时刻（epoch ms；快照值与桌面实时衰减显示存在小时级漂移，标注以示诚实） */
+  measuredAt: z.number().nullable().default(null),
 });
 export const RateLimit = RateLimits;
 export type RateLimit = z.infer<typeof RateLimit>;

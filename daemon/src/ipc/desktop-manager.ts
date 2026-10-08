@@ -1,7 +1,7 @@
 import type { SessionStatus } from "@agentlink/shared";
 import { IpcClient } from "./client";
 import { IpcMethod } from "./protocol";
-import { rolloutLimits } from "./rollout-limits";
+import { recentLimits } from "./rollout-limits";
 import { IpcFollowerSession, type FollowerMode } from "./follower";
 import type { DesktopFact } from "./mapper";
 import type { SessionEventBus } from "../events/bus";
@@ -100,13 +100,14 @@ export class DesktopSessionManager {
     this.startLimitsPolling(conversationId);
   }
 
-  /** 桌面会话的账户限额：IPC 快照不含 rate_limits，从 rollout 文件尾读（60s） */
+  /** 桌面会话的账户限额：IPC 快照不含 rate_limits，从 rollout 文件尾读（60s）。
+   *  账户级额度跨会话共享 → 同时扫全局最近活跃的 rollout 合并取最新。 */
   private limitsTimers = new Map<string, ReturnType<typeof setInterval>>();
   private startLimitsPolling(conversationId: string): void {
     if (!this.limitsMonitor || this.limitsTimers.has(conversationId)) return;
     const poll = () => {
-      const rl = rolloutLimits(conversationId);
-      if (rl) this.limitsMonitor?.ingest(rl.primary, rl.secondary);
+      const rl = recentLimits(conversationId);
+      if (rl) this.limitsMonitor?.ingest(rl.primary, rl.secondary, rl.measuredAt);
     };
     poll();
     this.limitsTimers.set(conversationId, setInterval(poll, 60_000));
