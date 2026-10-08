@@ -100,10 +100,15 @@ export function Home() {
                 const full = p5 >= 99 || weekFull;
                 const resetAt = new Date((weekFull && sec ? sec : rate.primary).resetsAt * 1000);
                 const hhmm = `${String(resetAt.getHours()).padStart(2, "0")}:${String(resetAt.getMinutes()).padStart(2, "0")}`;
+                const stale =
+                  "measuredAt" in rate && typeof rate.measuredAt === "number" && Date.now() - rate.measuredAt > 15 * 60_000
+                    ? `（${new Date(rate.measuredAt).getHours()}:${String(new Date(rate.measuredAt).getMinutes()).padStart(2, "0")} 数据）`
+                    : "";
                 return (
                   <span style={full ? { color: "var(--red)", fontWeight: 700 } : undefined}>
                     {" · "}
                     {full ? `额度用尽 ${hhmm} 重置` : `额度 ${p5}%${wk != null ? ` / 周 ${wk}%` : ""}`}
+                    {stale}
                   </span>
                 );
               })()}
