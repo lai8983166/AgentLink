@@ -259,9 +259,9 @@ export class IpcFollowerSession {
     );
   }
 
-  async decideApproval(requestId: string, decision: string): Promise<void> {
+  async decideApproval(requestId: string, decision: string, kind: "command" | "fileChange" = "command"): Promise<void> {
     await this.delegate(
-      IpcMethod.threadFollowerCommandApprovalDecision,
+      kind === "fileChange" ? IpcMethod.threadFollowerFileApprovalDecision : IpcMethod.threadFollowerCommandApprovalDecision,
       { conversationId: this.conversationId, requestId, decision },
     );
   }

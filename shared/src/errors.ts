@@ -7,6 +7,10 @@ export const ApiErrorCode = z.enum([
   "SESSION_NOT_FOUND",
   "APPROVAL_EXPIRED", // 审批随轮次结束已作废
   "APPROVAL_NOT_FOUND",
+  "APPROVAL_ALREADY_DECIDED",
+  "IPC_UNAVAILABLE",
+  "IPC_OWNER_NOT_FOUND",
+  "IPC_INCOMPATIBLE",
   "PATH_NOT_ALLOWED", // 路径不在白名单
   "SNAPSHOT_REQUIRED", // lastSeq 早于事件保留窗口，需全量拉取
   "VALIDATION_ERROR",

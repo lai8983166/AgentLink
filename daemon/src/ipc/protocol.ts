@@ -13,6 +13,7 @@ export const IpcMethod = {
   threadFollowerStartTurn: "thread-follower-start-turn",
   threadFollowerInterruptTurn: "thread-follower-interrupt-turn",
   threadFollowerCommandApprovalDecision: "thread-follower-command-approval-decision",
+  threadFollowerFileApprovalDecision: "thread-follower-file-approval-decision",
 } as const;
 export type IpcMethod = (typeof IpcMethod)[keyof typeof IpcMethod];
 
@@ -22,6 +23,7 @@ export const IPC_VERSIONS: Record<string, number> = {
   [IpcMethod.threadFollowerStartTurn]: 2,
   [IpcMethod.threadFollowerInterruptTurn]: 4,
   [IpcMethod.threadFollowerCommandApprovalDecision]: 1,
+  [IpcMethod.threadFollowerFileApprovalDecision]: 1,
 };
 
 /** 订阅/退订经定向 broadcast（非 request） */
