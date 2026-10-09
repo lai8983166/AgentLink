@@ -57,8 +57,8 @@ export function authMiddleware(tokenRef: { token: string }): MiddlewareHandler {
 /** DaemonError/IPC 错误 → envelope；zod → VALIDATION_ERROR；其余 → INTERNAL */
 export function errorToResponse(c: Context, e: unknown) {
   if (e instanceof DaemonError) {
-    const status = e.code === "UNAUTHORIZED" ? 401 : e.code.startsWith("SESSION_NOT") || e.code === "APPROVAL_NOT_FOUND" ? 404 : e.code === "VALIDATION_ERROR" ? 400 : e.code === "SESSION_BUSY" || e.code === "APPROVAL_EXPIRED" || e.code === "PATH_NOT_ALLOWED" || e.code === "APPROVAL_ALREADY_DECIDED" ? 409 : 500;
-    return c.json(errorBody(e.code, e.message), status as 400 | 401 | 404 | 409 | 500);
+    const status = e.code === "UNAUTHORIZED" ? 401 : e.code.startsWith("SESSION_NOT") || e.code === "APPROVAL_NOT_FOUND" ? 404 : e.code === "VALIDATION_ERROR" ? 400 : e.code === "SESSION_BUSY" || e.code === "APPROVAL_EXPIRED" || e.code === "PATH_NOT_ALLOWED" || e.code === "APPROVAL_ALREADY_DECIDED" ? 409 : e.code.startsWith("IPC_") ? 502 : 500;
+    return c.json(errorBody(e.code, e.message), status as 400 | 401 | 404 | 409 | 500 | 502);
   }
   // IPC 层错误（Error with IPC_* 前缀）
   if (e instanceof Error && /^ipc (error|timeout)/i.test(e.message)) {
@@ -111,8 +111,9 @@ export function createApiRouter(deps: ApiDeps): Hono {
   });
 
   api.post("/api/v1/sessions/:id/resume", async (c) => {
-    const session = await deps.registry.resume(c.req.param("id"));
-    return c.json({ session });
+    const id = c.req.param("id");
+    await deps.registry.resume(id);
+    return c.json(await deps.registry.detail(id));
   });
 
   api.post("/api/v1/sessions/:id/message", async (c) => {

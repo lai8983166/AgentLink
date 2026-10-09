@@ -82,14 +82,14 @@ afterEach(() => {
   }
 });
 
-async function setup(opts: { summaryTimeoutMs?: number; controls?: ControlStore } = {}) {
+async function setup(opts: { summaryTimeoutMs?: number; controls?: ControlStore; assertNoWriter?: (id: string) => Promise<void> } = {}) {
   const fake = new FakeCodexServer();
   const bridge = new CodexBridge(fake);
   const bus = new SessionEventBus();
   const audit = new AuditStore(join(tmp, "a.db"));
   const approvals = new ApprovalService(bridge, bus, audit);
   const fs = new FsService([tmp]);
-  const registry = new SessionRegistry(bridge, bus, approvals, fs);
+  const registry = new SessionRegistry(bridge, bus, approvals, fs, undefined, opts.assertNoWriter, async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }));
   const pipe = new FakePipe();
   const manager = new DesktopSessionManager(bus, approvals, {
     ...opts,
@@ -405,5 +405,30 @@ describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
     expect(forkSession?.forkedFromId).toBe("old1");
     expect(origin?.forkedToId).toBe("fork-1");
     expect(forkSession?.title).toContain("接力");
+  });
+
+  test("失去桌面 owner 后继续原 ID：停止旧跟随，忽略迟到快照，后续发送和中断走本地", async () => {
+    const { registry, manager, pipe, fake } = await setup({ assertNoWriter: async () => {} });
+    try {
+      const observe = registry.observe("old1", "takeover"); pipe.fireConnect(); await observe;
+      await pushBase(pipe);
+      pipe.ownerAvailable = false;
+      const resumed = await registry.resume("old1");
+      expect(resumed.controlMode).toBe("local");
+      expect(manager.has("old1")).toBe(false);
+      expect(manager.isTakenOver("old1")).toBe(false);
+      const requestsBefore = pipe.frames().length;
+      await manager.syncSummaries(["old1"]);
+      pipe.pushState("old1", snap(10, [{ id: "late", type: "agentMessage", text: "旧 owner 的迟到回复" }]));
+      expect(pipe.frames()).toHaveLength(requestsBefore);
+      expect((await registry.detail("old1")).session.history.some((h) => h.id === "late")).toBe(false);
+      await registry.sendMessage("old1", "继续", "new-local-intent");
+      await registry.interrupt("old1");
+      const local = fake.written.map((line) => JSON.parse(line));
+      expect(local.filter((m) => m.method === "thread/resume")).toHaveLength(1);
+      expect(local.filter((m) => m.method === "turn/start")).toHaveLength(1);
+      expect(local.filter((m) => m.method === "turn/interrupt")).toHaveLength(1);
+      expect(pipe.frames().some((m) => m.method === "thread-follower-interrupt-turn" || m.method === "thread-follower-start-turn")).toBe(false);
+    } finally { manager.shutdown(); }
   });
 });

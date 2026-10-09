@@ -3,6 +3,7 @@ import type { CodexTransport, CodexTransportFactory } from "../codex/process";
 /** 测试用假 codex app-server：可编程响应 + 可注入推送 */
 export class FakeCodexServer implements CodexTransportFactory {
   written: string[] = [];
+  resumeError: string | null = null;
   private onData: ((c: string) => void) | null = null;
 
   create(onData: (c: string) => void): CodexTransport {
@@ -35,7 +36,7 @@ export class FakeCodexServer implements CodexTransportFactory {
             },
           ],
         },
-        "thread/resume": { thread: { id: "t1" } },
+        "thread/resume": { thread: { id: msg.params?.threadId }, approvalPolicy: msg.params?.approvalPolicy ?? "never" },
         "thread/fork": {
           thread: {
             id: "fork-1",
@@ -66,8 +67,8 @@ export class FakeCodexServer implements CodexTransportFactory {
       };
       const result = results[msg.method] ?? {};
       const err =
-        msg.method === "thread/resume" && msg.params?.threadId === "busy"
-          ? { code: -32600, message: "thread busy already has an active writer" }
+        msg.method === "thread/resume" && (msg.params?.threadId === "busy" || this.resumeError)
+          ? { code: -32600, message: this.resumeError ?? "thread busy already has an active writer" }
           : undefined;
       this.send(err ? { jsonrpc: "2.0", id: msg.id, error: err } : { jsonrpc: "2.0", id: msg.id, result });
     }

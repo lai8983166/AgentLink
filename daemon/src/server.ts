@@ -19,6 +19,7 @@ import { DAEMON_VERSION } from "./server-version";
 import { randomUUID } from "node:crypto";
 import { ControlStore } from "./domain/control-store";
 import { configDir } from "./config";
+import type { ResumeSettings } from "./codex/resume-settings";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
 
@@ -42,6 +43,8 @@ export function createApp(opts: {
   auditPath?: string;
   /** 自动化测试禁用真实桌面管道，保证不触碰用户会话。 */
   desktop?: false;
+  assertNoWriter?: (id: string) => Promise<void>;
+  resumeSettings?: (id: string) => Promise<ResumeSettings>;
   desktopFactory?: (bus: SessionEventBus, approvals: ApprovalService, controls: ControlStore) => DesktopSessionManager;
   ntfy?: NtfyConfig;
   /** 轮换后持久化回调（写配置文件） */
@@ -59,7 +62,7 @@ export function createApp(opts: {
   const approvals = new ApprovalService(opts.bridge, bus, audit);
   const fs = new FsService(opts.allowedRoots);
   const controls = new ControlStore(opts.auditPath ? `${opts.auditPath}.controls` : join(configDir(), "controls.db"));
-  const registry = new SessionRegistry(opts.bridge, bus, approvals, fs, controls);
+  const registry = new SessionRegistry(opts.bridge, bus, approvals, fs, controls, opts.assertNoWriter, opts.resumeSettings);
 
   // 账户限额（app-server 通知 + 桌面会话 rollout 尾读）：状态 pill / 用尽告警
   const limits = new LimitsMonitor();

@@ -9,6 +9,7 @@ import {
   type CodexThreadTurnsResult,
 } from "./protocol";
 import type { CodexTransport, CodexTransportFactory } from "./process";
+import type { ResumeSettings } from "./resume-settings";
 
 /** 域层错误：code 即 shared ApiErrorCode */
 export class DaemonError extends Error {
@@ -166,15 +167,19 @@ export class CodexBridge {
 
   async threadResume(
     threadId: string,
-    approvalPolicy: CodexApprovalPolicy,
-  ): Promise<CodexThreadInfo> {
+    approvalPolicy?: CodexApprovalPolicy,
+    settings?: ResumeSettings,
+  ): Promise<CodexThreadInfo & { approvalPolicy?: CodexApprovalPolicy }> {
     try {
-      const res = await this.rpc.call<{ thread?: CodexThreadInfo }>(CodexMethod.threadResume, {
+      const res = await this.rpc.call<{ thread?: CodexThreadInfo; approvalPolicy?: unknown }>(CodexMethod.threadResume, {
         threadId,
-        approvalPolicy,
+        ...(approvalPolicy === undefined ? {} : { approvalPolicy }),
+        ...(settings ? { sandbox: settings.sandbox, ...(settings.config ? { config: settings.config } : {}) } : {}),
       });
       if (!res?.thread) throw new DaemonError("INTERNAL", "thread/resume 未返回 thread");
-      return res.thread;
+      if (res.thread.id !== threadId) throw new DaemonError("INTERNAL", "恢复结果不是请求的原会话，已停止后续操作");
+      const effective = res.approvalPolicy;
+      return { ...res.thread, approvalPolicy: effective === "never" || effective === "on-request" || effective === "untrusted" ? effective : undefined };
     } catch (e) {
       if (e instanceof RpcError && /active writer/i.test(e.message)) {
         throw new DaemonError("SESSION_BUSY", "会话正在电脑上使用中（被 IDE/Codex Desktop 占用）");
@@ -199,11 +204,11 @@ export class CodexBridge {
     return res;
   }
 
-  async turnStart(threadId: string, text: string, approvalPolicy: CodexApprovalPolicy): Promise<void> {
+  async turnStart(threadId: string, text: string, approvalPolicy?: CodexApprovalPolicy): Promise<void> {
     await this.rpc.call(CodexMethod.turnStart, {
       threadId,
       input: [{ type: "text", text }],
-      approvalPolicy,
+      ...(approvalPolicy === undefined ? {} : { approvalPolicy }),
     });
   }
 

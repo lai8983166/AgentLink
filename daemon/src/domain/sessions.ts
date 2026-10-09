@@ -15,6 +15,8 @@ import type { SessionEventBus } from "../events/bus";
 import type { ApprovalService } from "./approvals";
 import type { FsService } from "./fs";
 import { ControlStore } from "./control-store";
+import { assertNoThreadWriter } from "../codex/writer-lock";
+import { readResumeSettings, type ResumeSettings } from "../codex/resume-settings";
 
 /** 会话注册表（任务 4.1/4.2）：状态机 + 事件发布 + 列表聚合 */
 
@@ -31,12 +33,14 @@ interface LiveSession {
   summary: SessionSummary;
   history: HistoryItem[];
   tokenUsage: TokenUsage | null;
-  desiredPolicy: ApprovalPolicy;
+  desiredPolicy: ApprovalPolicy | undefined;
   activity: string | null;
 }
 
 export class SessionRegistry {
   private sending = new Map<string, Promise<MessageReceipt>>();
+  private resuming = new Map<string, Promise<SessionDetail>>();
+  private loaded = new Set<string>();
   private draining = false;
   private pendingOperations = 0;
 
@@ -77,6 +81,7 @@ export class SessionRegistry {
     historyFor(id: string): import("@agentlink/shared").HistoryItem[] | null;
     /** 桌面/VS Code 当前是否持有；检测不可用必须抛错，不能当作无人持有。 */
     ownerAlive?(id: string): Promise<boolean>;
+    useLocal?(id: string): void;
     /** 摘要变化回调（属性，由 registry 覆写接线） */
     onSummaryChange: (id: string) => void;
   } | null = null;
@@ -91,6 +96,7 @@ export class SessionRegistry {
   setDesktopManager(m: NonNullable<SessionRegistry["desktop"]>): void {
     this.desktop = m;
     m.onSummaryChange = (id) => {
+      if (this.live.has(id)) return;
       // 桌面会话摘要变化 → 用合并后的摘要广播列表事件
       const merged = this.mergeDesktopOverlay(id);
       if (merged) this.bus.publishList({ type: "session.updated", summary: { ...merged } });
@@ -121,11 +127,14 @@ export class SessionRegistry {
     private readonly approvals: ApprovalService,
     private readonly fs: FsService,
     private readonly controls: ControlStore = new ControlStore(),
+    private readonly assertNoWriter: (id: string) => Promise<void> = assertNoThreadWriter,
+    private readonly resumeSettings: (id: string) => Promise<ResumeSettings> = readResumeSettings,
   ) {}
 
   async start(): Promise<void> {
     this.bridge.onFact((f) => this.consume(f));
     this.bridge.onRestart(() => {
+      this.loaded.clear();
       // codex 重启：实时状态全丢，回读 rollout 重建
       for (const [id, s] of this.live) {
         if (s.summary.status === "running" || s.summary.status === "waiting_approval") {
@@ -151,7 +160,7 @@ export class SessionRegistry {
   /** 全量列表：实时会话 + rollout 既有会话（live 优先） */
   async list(): Promise<SessionSummary[]> {
     await this.refreshRollouts();
-    await this.desktop?.syncSummaries?.([...this.rolloutIndex.values()].filter((s) => s.desktopManaged).map((s) => s.id));
+    await this.desktop?.syncSummaries?.([...this.rolloutIndex.values()].filter((s) => s.desktopManaged && !this.live.has(s.id)).map((s) => s.id));
     const out = new Map<string, SessionSummary>();
     for (const [id, s] of this.rolloutIndex) {
       out.set(id, this.mergeDesktopOverlay(id) ?? s);
@@ -346,42 +355,58 @@ export class SessionRegistry {
       activity: null,
     });
     this.bus.publishList({ type: "session.created", summary });
+    this.loaded.add(id);
     await this.bridge.turnStart(id, opts.prompt, opts.approvalPolicy);
     return id;
   }
 
   resume(id: string, policy?: ApprovalPolicy): Promise<SessionDetail> {
-    return this.controlOperation(() => this.resumeSession(id, policy));
+    this.ensureAccepting();
+    const pending = this.resuming.get(id);
+    if (pending) return pending;
+    const result = this.controlOperation(() => this.resumeSession(id, policy)).finally(() => this.resuming.delete(id));
+    this.resuming.set(id, result);
+    return result;
   }
 
   private async resumeSession(id: string, policy?: ApprovalPolicy): Promise<SessionDetail> {
     this.ensureAccepting();
-    const desired = policy ?? this.live.get(id)?.desiredPolicy ?? "on-request";
-    // 即使 IPC 暂时找不到 owner，桌面原会话也只能通过 follower 操作。
-    // 接管后 activeElsewhere=false、owner 丢失后 desktopGone=true 都不允许回落 resume。
-    if (this.rolloutIndex.get(id)?.desktopManaged || this.desktop?.has(id)) {
-      throw new DaemonError("SESSION_BUSY", "原会话由电脑端管理，请通过观察或接管连接；连接不可用时请在电脑端打开原会话");
-    }
-    // 5 分钟时间戳启发式不可靠：桌面会话闲置时不报 busy，直接 resume 会把写权抢过来，
-    // 桌面端被锁成只读（"已在另一个应用中打开"）。先问 IPC 谁持有，桌面/VS Code
-    // 在持有 → 走 SESSION_BUSY，客户端既有逻辑会自动转观察模式。
-    if (this.desktop?.ownerAlive && (await this.desktop.ownerAlive(id))) {
-      throw new DaemonError("SESSION_BUSY", "会话正在电脑端打开中（桌面/VS Code 持有），已转观察模式");
-    }
-    // 单写者冲突在这里抛 SESSION_BUSY（bridge 映射）
-    await this.bridge.threadResume(id, desired);
+    // 页面刷新或两个手机重复恢复，不能重置正在运行的任务。
+    if (this.loaded.has(id) && this.live.has(id)) return (await this.detail(id)).session;
     const { session } = await this.detail(id);
+    const desktopOrigin = !!this.rolloutIndex.get(id)?.desktopManaged || !!this.desktop?.has(id);
+    if (desktopOrigin && !this.desktop?.ownerAlive) {
+      throw new DaemonError("IPC_UNAVAILABLE", "无法确认电脑端已释放原会话，未恢复会话");
+    }
+    const settings = desktopOrigin ? await this.resumeSettings(id) : undefined;
+    if (this.desktop?.ownerAlive && (await this.desktop.ownerAlive(id))) {
+      throw new DaemonError("SESSION_BUSY", "原会话正在电脑端打开中，请使用接管此会话，或先在电脑端关闭该会话");
+    }
+    if (desktopOrigin) {
+      await this.assertNoWriter(id);
+      // OS 核验期间电脑端可能重新打开了会话，恢复前再次确认。
+      if (await this.desktop!.ownerAlive!(id)) throw new DaemonError("SESSION_BUSY", "电脑端已重新打开原会话，请使用接管此会话");
+    }
+    // 明确继承原会话的 sandbox，避免 app-server 默默使用 daemon 默认权限。
+    const thread = await this.bridge.threadResume(id, policy ?? settings?.approvalPolicy, settings);
+    const desired = policy ?? thread.approvalPolicy;
     // summary 只留摘要字段：detail 的 history/tokenUsage 不能混入，
     // 否则列表接口与列表推送会被撑到 MB 级（外网下首页 15s 轮询灾难）
-    const { history, tokenUsage, ...summaryBase } = session;
+    const { history, tokenUsage, approvals: _approvals, controlMode: _mode, ...summaryBase } = session;
+    this.desktop?.useLocal?.(id);
+    this.approvals.expireSession(id);
     this.live.set(id, {
-      summary: { ...summaryBase, status: "idle", statusUpdatedAt: Date.now(), approvalPolicy: desired, pendingApprovals: 0 },
+      summary: { ...summaryBase, status: "idle", statusUpdatedAt: Date.now(), approvalPolicy: desired ?? session.approvalPolicy,
+        desktopManaged: false, desktopGone: false, activeElsewhere: false, activeVia: null, pendingApprovals: 0 },
       history,
       tokenUsage: tokenUsage ?? null,
       desiredPolicy: desired,
       activity: null,
     });
-    return session;
+    this.loaded.add(id);
+    this.publishStatus(id, this.live.get(id)!);
+    this.bus.publish(id, { type: "history.sync" });
+    return (await this.detail(id)).session;
   }
 
   sendMessage(id: string, text: string, clientMessageId: string = crypto.randomUUID()): Promise<MessageReceipt> {
@@ -420,7 +445,7 @@ export class SessionRegistry {
 
   private async dispatchMessage(id: string, text: string, clientMessageId: string): Promise<void> {
     // 桌面接管态：委托 IPC follower（任务 3.3，含 clientUserMessageId 幂等）
-    if (this.desktop?.isTakenOver(id)) {
+    if (!this.live.has(id) && this.desktop?.isTakenOver(id)) {
       // rollout 摘要里的默认审批策略不代表桌面的实际权限，不能用于覆盖原会话。
       await this.desktop.sendTurn(id, text, clientMessageId);
       const base = this.rolloutIndex.get(id);
@@ -429,13 +454,12 @@ export class SessionRegistry {
     }
     this.ensureLive(id);
     const s = this.live.get(id)!;
-    s.desiredPolicy = s.desiredPolicy ?? s.summary.approvalPolicy;
     await this.bridge.turnStart(id, text, s.desiredPolicy);
     s.summary.lastActivityAt = Date.now();
   }
 
   async interrupt(id: string): Promise<void> {
-    if (this.desktop?.has(id)) {
+    if (!this.live.has(id) && this.desktop?.has(id)) {
       if (this.desktop.isTakenOver(id)) {
         await this.desktop.interrupt(id);
         this.approvals.expireSession(id);
@@ -452,11 +476,13 @@ export class SessionRegistry {
 
   /** 观察桌面持有的会话（busy 会话实时流）；IPC 不可用抛出对应错误 */
   async observe(id: string, mode: "observe" | "takeover" = "observe"): Promise<void> {
+    if (this.live.has(id)) return;
     if (!this.desktop) throw new DaemonError("INTERNAL", "桌面 IPC 未启用");
     await this.desktop.observe(id, mode);
   }
 
   async takeover(id: string): Promise<void> {
+    if (this.live.has(id)) return;
     if (!this.desktop) throw new DaemonError("INTERNAL", "桌面 IPC 未启用");
     await this.desktop.takeover(id);
     const merged = this.mergeDesktopOverlay(id);
@@ -498,6 +524,7 @@ export class SessionRegistry {
       desiredPolicy: p,
       activity: null,
     });
+    this.loaded.add(forkId);
     await this.refreshRollouts();
     this.bus.publishList({
       type: "session.created",
@@ -525,6 +552,9 @@ export class SessionRegistry {
   consume(f: MappedFact): void {
     switch (f.kind) {
       case "threadStarted": {
+        // resume 的通知不能抢先建立空历史，也不能把继承权限改成 on-request。
+        if (this.resuming.has(f.threadId)) return;
+        this.loaded.add(f.threadId);
         if (!this.live.has(f.threadId) && f.cwd) {
           const summary: SessionSummary = {
             id: f.threadId,
