@@ -121,6 +121,16 @@ describe("REST API", () => {
     expect(typeof body.latestSeq).toBe("number");
   });
 
+  test("旧手机客户端请求恢复桌面原会话：409 且不会写入 thread/resume", async () => {
+    const { app, fake, authed } = await setup();
+    const res = await app.request("/api/v1/sessions/old1/resume", {
+      method: "POST", headers: authed,
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: "SESSION_BUSY" } });
+    expect(fake.written.map((s) => JSON.parse(s).method)).not.toContain("thread/resume");
+  });
+
   test("resume 占用冲突 → 409 SESSION_BUSY", async () => {
     const { app, authed } = await setup();
     const res = await app.request("/api/v1/sessions/busy/resume", {

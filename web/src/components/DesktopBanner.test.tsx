@@ -35,7 +35,7 @@ function ui(props: Partial<Parameters<typeof DesktopBanner>[0]> = {}) {
 describe("DesktopBanner（任务 5.1-5.3）", () => {
   test("观察模式：显示占用方与接管按钮", () => {
     render(ui({ activeElsewhere: true }));
-    expect(screen.getByText(/ChatGPT 桌面端运行中/)).toBeTruthy();
+    expect(screen.getByText(/ChatGPT 桌面端原会话/)).toBeTruthy();
     expect(screen.getByText("接管此会话")).toBeTruthy();
   });
 
@@ -47,9 +47,17 @@ describe("DesktopBanner（任务 5.1-5.3）", () => {
     expect(api.takeover).toHaveBeenCalledWith("s1");
   });
 
-  test("desktopGone → 不显示横幅（可直接恢复）", () => {
+  test("普通会话 desktopGone → 不显示桌面横幅", () => {
     render(ui({ activeElsewhere: true, desktopGone: true }));
     expect(screen.queryByText("接管此会话")).toBeNull();
+  });
+
+  test("桌面原会话闲置或失联仍保留原会话接管入口", () => {
+    const { rerender } = render(ui({ desktopManaged: true }));
+    expect(screen.getByText("接管此会话")).toBeTruthy();
+    rerender(ui({ desktopManaged: true, desktopGone: true }));
+    expect(screen.getByText(/电脑端连接不可用/)).toBeTruthy();
+    expect(screen.getByText("接管此会话")).toBeTruthy();
   });
 
   test("已接管：无横幅；有谱系来源时显示接力标注", () => {
