@@ -4,6 +4,8 @@
 # Node（daemon / PWA 将来使用）
 node_modules/
 dist/
+playwright-report/
+test-results/
 build/
 *.log
 

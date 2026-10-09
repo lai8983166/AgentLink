@@ -266,6 +266,12 @@ export class DesktopSessionManager {
     this.statusTimes.delete(conversationId);
     this.stopLimitsPolling(conversationId);
   }
+  /** 后台退出只释放订阅与定时器，保留已授权的控制记录，不中断桌面任务。 */
+  shutdown(): void {
+    for (const [id, follower] of this.sessions) { follower.stop(); this.stopLimitsPolling(id); }
+    this.sessions.clear();
+    this.client?.disconnect();
+  }
 
   /** 接管态发消息（任务 3.3）：clientUserMessageId 幂等（60s 内同文本重试复用）。
    *  失败（额度用尽/桌面拒绝等）→ error 事件让手机立刻看到原因，而不是静默恢复输入框 */

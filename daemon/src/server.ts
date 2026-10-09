@@ -30,6 +30,8 @@ export interface DaemonApp {
   audit: AuditStore;
   bridge: CodexBridge;
   auth: { token: string };
+  controls: ControlStore;
+  desktop?: DesktopSessionManager;
 }
 
 export function createApp(opts: {
@@ -40,6 +42,7 @@ export function createApp(opts: {
   auditPath?: string;
   /** 自动化测试禁用真实桌面管道，保证不触碰用户会话。 */
   desktop?: false;
+  desktopFactory?: (bus: SessionEventBus, approvals: ApprovalService, controls: ControlStore) => DesktopSessionManager;
   ntfy?: NtfyConfig;
   /** 轮换后持久化回调（写配置文件） */
   onTokenRotate?: (newToken: string) => void;
@@ -64,7 +67,7 @@ export function createApp(opts: {
   registry.setLimitsMonitor(limits);
 
   // 桌面 IPC follower（任务 3.1）：观察/接管桌面持有会话
-  const desktop = opts.desktop === false ? undefined : new DesktopSessionManager(bus, approvals, {
+  const desktop = opts.desktop === false ? undefined : opts.desktopFactory?.(bus, approvals, controls) ?? new DesktopSessionManager(bus, approvals, {
     controls,
     log: (...a: unknown[]) => console.log("[desktop]", ...a),
   });
@@ -148,7 +151,7 @@ export function createApp(opts: {
     });
   }
 
-  return { app, registry, approvals, audit, bridge: opts.bridge, auth };
+  return { app, registry, approvals, audit, controls, desktop, bridge: opts.bridge, auth };
 }
 
 /** serveStatic 的 root 相对于进程 CWD，这里换成相对 import 路径的 posix 形式 */

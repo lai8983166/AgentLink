@@ -3,18 +3,23 @@
   "private": true,
   "packageManager": "pnpm@10.4.0",
   "pnpm": {
-    "onlyBuiltDependencies": ["@biomejs/biome"]
+    "onlyBuiltDependencies": [
+      "@biomejs/biome"
+    ]
   },
   "scripts": {
     "dev": "pnpm --filter @agentlink/daemon dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r typecheck && tsc --noEmit -p tsconfig.e2e.json",
     "test": "pnpm -r test",
+    "test:e2e": "playwright test",
+    "check": "pnpm typecheck && pnpm test && pnpm --filter @agentlink/web build && pnpm test:e2e",
     "lint": "biome check .",
     "format": "biome format --write ."
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "1.58.2",
     "typescript": "^5.6.3"
   }
 }
