@@ -4,6 +4,7 @@ import type { CodexTransport, CodexTransportFactory } from "../codex/process";
 export class FakeCodexServer implements CodexTransportFactory {
   written: string[] = [];
   resumeError: string | null = null;
+  onTurnStart?: (params: Record<string, unknown>) => void;
   private onData: ((c: string) => void) | null = null;
 
   create(onData: (c: string) => void): CodexTransport {
@@ -71,6 +72,7 @@ export class FakeCodexServer implements CodexTransportFactory {
           ? { code: -32600, message: this.resumeError ?? "thread busy already has an active writer" }
           : undefined;
       this.send(err ? { jsonrpc: "2.0", id: msg.id, error: err } : { jsonrpc: "2.0", id: msg.id, result });
+      if (msg.method === "turn/start" && !err) this.onTurnStart?.(msg.params);
     }
   }
 

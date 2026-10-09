@@ -64,7 +64,7 @@ export class ApiClient {
     return this.request<SessionDetailResponse>(`/api/v1/sessions/${id}`);
   }
   resume(id: string) {
-    return this.request<{ session: unknown }>(`/api/v1/sessions/${id}/resume`, { method: "POST" });
+    return this.request<SessionDetailResponse>(`/api/v1/sessions/${id}/resume`, { method: "POST" });
   }
   sendMessage(id: string, text: string, clientMessageId?: string) {
     return this.request<{ ok: boolean; receipt?: MessageReceipt }>(`/api/v1/sessions/${id}/message`, {

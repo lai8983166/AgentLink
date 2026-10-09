@@ -7,6 +7,14 @@ export function mergeSessionDetail(current: SessionDetailResponse | undefined, i
   return incoming;
 }
 
+/** Apply confirmed ownership without rolling back events that arrived during the resume response. */
+export function mergeResumedDetail(current: SessionDetailResponse | undefined, incoming: SessionDetailResponse): SessionDetailResponse {
+  const merged = mergeSessionDetail(current, incoming);
+  if (merged !== current || !current) return merged;
+  const { controlMode, desktopManaged, desktopGone, activeElsewhere, activeVia, approvalPolicy } = incoming.session;
+  return { ...current, session: { ...current.session, controlMode, desktopManaged, desktopGone, activeElsewhere, activeVia, approvalPolicy } };
+}
+
 export function applySessionEvent(current: SessionDetailResponse | undefined, e: SessionEvent): SessionDetailResponse | undefined {
   if (!current || current.session.id !== e.sessionId) return current;
   if (e.serverEpoch && current.serverEpoch && e.serverEpoch !== current.serverEpoch) return current;

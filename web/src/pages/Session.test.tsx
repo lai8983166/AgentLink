@@ -95,7 +95,7 @@ describe("原会话连接不会回落到独立 resume", () => {
   test("桌面会话闲置且 owner 不可达：只观察，失败也不自动 resume", async () => {
     vi.mocked(api.observe).mockRejectedValueOnce({ code: "IPC_OWNER_NOT_FOUND" });
     mount(session({ desktopManaged: true, activeElsewhere: false, desktopGone: true }));
-    await screen.findByText("电脑端连接不可用，请在 Codex 中打开原会话后重试");
+    await screen.findByText("电脑端未打开原会话；可以点击继续原会话，或在 Codex 中打开后接管");
     expect(api.observe).toHaveBeenCalledWith("desktop-1");
     expect(api.resume).not.toHaveBeenCalled();
   });
@@ -124,5 +124,35 @@ describe("原会话连接不会回落到独立 resume", () => {
     mount(session({ desktopManaged: false, activeElsewhere: false, activeVia: null }));
     await waitFor(() => expect(api.resume).toHaveBeenCalledWith("desktop-1"));
     expect(api.observe).not.toHaveBeenCalled();
+  });
+
+  test("主动继续原会话后立即切换本地控制，保留历史并允许发指令，不再观察", async () => {
+    const initial = session({ desktopManaged: true, desktopGone: true, activeElsewhere: false, controlMode: "observe",
+      history: [{ type: "userMessage", id: "old-message", text: "原历史", at: 1 }] });
+    const resumed = { session: { ...initial, desktopManaged: false, desktopGone: false, activeVia: null, controlMode: "local" as const, approvalPolicy: "never" as const }, latestSeq: 2 };
+    vi.mocked(api.resume).mockResolvedValue(resumed);
+    vi.mocked(api.sendMessage).mockResolvedValue({ ok: true });
+    mount(initial);
+    await waitFor(() => expect(api.observe).toHaveBeenCalledTimes(1));
+    expect((screen.getByRole("textbox") as HTMLInputElement).disabled).toBe(true);
+    expect(api.resume).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "继续原会话" }));
+    await waitFor(() => expect((screen.getByRole("textbox") as HTMLInputElement).disabled).toBe(false));
+    expect(screen.getByTestId("conversation-history").textContent).toContain("原历史");
+    expect(screen.queryByRole("button", { name: "继续原会话" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "追加指令" } });
+    fireEvent.click(screen.getByRole("button", { name: "↑" }));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith("desktop-1", "追加指令", expect.any(String)));
+    expect(api.observe).toHaveBeenCalledTimes(1);
+  });
+
+  test("恢复遭遇占用冲突：显示原因，输入保持禁用，不自动 fork 或接管", async () => {
+    vi.mocked(api.resume).mockRejectedValueOnce(new Error("原会话正在电脑端打开中，请使用接管此会话"));
+    mount(session({ desktopManaged: true, desktopGone: true, activeElsewhere: false }));
+    fireEvent.click(screen.getByRole("button", { name: "继续原会话" }));
+    await screen.findByText(/原会话正在电脑端打开中/);
+    expect((screen.getByRole("textbox") as HTMLInputElement).disabled).toBe(true);
+    expect(api.takeover).not.toHaveBeenCalled();
+    expect(api.sendMessage).not.toHaveBeenCalled();
   });
 });

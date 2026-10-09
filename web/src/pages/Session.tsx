@@ -8,7 +8,7 @@ import { ApprovalCard, type PendingApprovalUI } from "../components/ApprovalCard
 import { ToolCard } from "../components/ToolCard";
 import { MarkdownLite } from "../components/Markdown";
 import { DesktopBanner } from "../components/DesktopBanner";
-import { applySessionEvent, mergeSessionDetail } from "../session-state";
+import { applySessionEvent, mergeSessionDetail, mergeResumedDetail } from "../session-state";
 import { useMessageOutbox } from "../message-outbox";
 import { mergeOutgoingHistory } from "../message-history";
 import { useKeyboardViewport } from "../visible-viewport";
@@ -85,33 +85,38 @@ function SessionView() {
       ?.sessions.find((s) => s.id === sessionId);
   useEffect(() => {
     if (!summary) return;
+    let cancelled = false;
+    const connected = () => { if (!cancelled) setBusyError(null); };
+    const failed = (message: string) => { if (!cancelled) setBusyError(message); };
     if (summary.desktopManaged || summary.activeElsewhere || takenOver) {
       api
         .observe(sessionId)
-        .then(() => setBusyError(null))
+        .then(connected)
         .catch((e) => {
           if ((e as { code?: string }).code === "IPC_OWNER_NOT_FOUND") {
-            setBusyError("电脑端连接不可用，请在 Codex 中打开原会话后重试");
+            failed("电脑端未打开原会话；可以点击继续原会话，或在 Codex 中打开后接管");
           } else {
-            setBusyError(e instanceof Error ? e.message : "电脑端连接失败，请重试");
+            failed(e instanceof Error ? e.message : "电脑端连接失败，请重试");
           }
         });
-      return;
+      return () => { cancelled = true; };
     }
     api
       .resume(sessionId)
-      .then(() => setBusyError(null))
+      .then(connected)
       .catch((e) => {
         if ((e as { code?: string }).code === "SESSION_BUSY") {
-          // 占用检测是 5 分钟启发式，实际拥有者可能还在（对话开着但闲置）→ 转观察模式
+          if (cancelled) return;
+          // 确认被其他入口持有时转观察，不能自动抢写权。
           api
             .observe(sessionId)
-            .then(() => setBusyError(null))
+            .then(connected)
             .catch(() =>
-              setBusyError("电脑端连接不可用，请在 Codex 中打开原会话后重试"),
+              failed("电脑端连接不可用，请在 Codex 中打开原会话后重试"),
             );
-        } else setBusyError(e instanceof Error ? e.message : "会话连接失败，请重试");
+        } else failed(e instanceof Error ? e.message : "会话连接失败，请重试");
       });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, summary?.id, summary?.desktopManaged, summary?.activeElsewhere, takenOver]);
 
@@ -295,6 +300,16 @@ function SessionView() {
           queryClient.setQueryData<SessionDetailResponse>(["session", sessionId], (old) => old && ({
             ...old, session: { ...old.session, controlMode: "takeover" },
           }));
+          queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
+        }}
+        onResumed={async (detail) => {
+          // 撤销在途观察详情请求，避免它在恢复成功后再次覆盖控制模式。
+          await queryClient.cancelQueries({ queryKey: ["session", sessionId] });
+          setTakenOverId(null);
+          setBusyError(null);
+          setLiveStatus(null);
+          queryClient.setQueryData<SessionDetailResponse>(["session", sessionId], (old) => mergeResumedDetail(old, detail));
+          queryClient.invalidateQueries({ queryKey: ["sessions"] });
           queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
         }}
         onForked={(newId) => {

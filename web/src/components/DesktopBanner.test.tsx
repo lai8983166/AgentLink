@@ -9,6 +9,7 @@ vi.mock("../runtime", () => ({
     takeover: vi.fn().mockResolvedValue({ ok: true }),
     fork: vi.fn().mockResolvedValue({ id: "fork-9" }),
     observe: vi.fn().mockResolvedValue({ ok: true }),
+    resume: vi.fn(),
   },
   ws: { subscribe: vi.fn(() => () => {}), onSnapshotRequired: () => {} },
 }));
@@ -84,5 +85,18 @@ describe("DesktopBanner（任务 5.1-5.3）", () => {
     fireEvent.click(screen.getByText(/接力为新会话/));
     await waitFor(() => expect(onForked).toHaveBeenCalledWith("fork-9"));
     expect(api.fork).toHaveBeenCalledWith("s1");
+  });
+
+  test("已接管但失联时仍可显式恢复原会话，检查中禁止重复点击", async () => {
+    let fail!: (e: Error) => void;
+    vi.mocked(api.resume).mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
+    render(ui({ desktopManaged: true, desktopGone: true, takenOver: true, onResumed: vi.fn() }));
+    fireEvent.click(screen.getByRole("button", { name: "继续原会话" }));
+    expect((screen.getByRole("button", { name: "检查并恢复中…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "接管此会话" }) as HTMLButtonElement).disabled).toBe(true);
+    fail(new Error("无法确认写入锁，未恢复会话"));
+    await screen.findByText(/无法确认写入锁/);
+    expect(api.resume).toHaveBeenCalledWith("s1");
+    expect((screen.getByRole("button", { name: "继续原会话" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
