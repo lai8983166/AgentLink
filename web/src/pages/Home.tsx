@@ -94,7 +94,8 @@ export function Home() {
             }}
           >
             <span style={{ color: wsConnected ? "var(--green)" : "var(--red)" }}>●</span>
-            家里PC · {wsConnected ? "已连接" : "连接中…"}
+            手机与后台 · {wsConnected ? "已连接" : "连接中…"}
+            {statusQ.data?.connections && <span> · 桌面{statusQ.data.connections.desktop === "ready" ? "已连接" : "待连接"}</span>}
             {rate &&
               (() => {
                 const p5 = Math.round(rate.primary.usedPercent);

@@ -40,13 +40,14 @@ export function createRealTransportFactory(): CodexTransportFactory {
       })();
       // stderr 只做低频日志，防止刷屏
       let stderrBuf = "";
+      const errDecoder = new TextDecoder();
       const errReader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
       (async () => {
         try {
           for (;;) {
             const { done, value } = await errReader.read();
             if (done) break;
-            stderrBuf += decoder.decode(value, { stream: true });
+            stderrBuf += errDecoder.decode(value, { stream: true });
             const lines = stderrBuf.split("\n");
             stderrBuf = lines.pop() ?? "";
           }

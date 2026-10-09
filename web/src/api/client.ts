@@ -23,12 +23,17 @@ export class ApiClient {
   constructor(
     private readonly baseUrl = "",
     private readonly getToken: () => string | null,
+    private readonly options: { timeoutMs?: number } = {},
   ) {}
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 20000);
+    try {
     const token = this.getToken();
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
+      signal: controller.signal,
       headers: {
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -43,6 +48,10 @@ export class ApiClient {
       throw new ApiError(err?.code ?? "INTERNAL", err?.message ?? `HTTP ${res.status}`, res.status);
     }
     return body as T;
+    } catch (e) {
+      if (controller.signal.aborted) throw new ApiError("REQUEST_TIMEOUT", "请求超时，请核对操作是否已被电脑接收", 0);
+      throw e;
+    } finally { clearTimeout(timer); }
   }
 
   status() {

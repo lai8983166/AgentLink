@@ -27,10 +27,13 @@ export class DaemonError extends Error {
  * - 事实订阅：映射后的 MappedFact 流
  */
 export class CodexBridge {
+  ready = false;
   private conn: JsonRpcConnection | null = null;
   private restartDelayMs = 500;
   private restarting = false;
   private stopped = false;
+  private transport: CodexTransport | null = null;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private factListeners = new Set<(f: MappedFact) => void>();
   private exitListeners = new Set<() => void>();
 
@@ -54,7 +57,11 @@ export class CodexBridge {
 
   stop(): void {
     this.stopped = true;
+    this.ready = false;
+    if (this.restartTimer) clearTimeout(this.restartTimer);
+    this.restartTimer = null;
     this.conn?.markClosed();
+    this.transport?.kill();
   }
 
   private emitFact(f: MappedFact): void {
@@ -62,10 +69,7 @@ export class CodexBridge {
   }
 
   private async spawnAndInitialize(): Promise<void> {
-    let resolveReady: () => void = () => {};
-    const ready = new Promise<void>((r) => {
-      resolveReady = r;
-    });
+    this.ready = false;
     // 传输与连接循环依赖：用可变引用解耦，连接先建、写出后接通
     let transport: CodexTransport | null = null;
     const conn = new JsonRpcConnection(
@@ -77,43 +81,46 @@ export class CodexBridge {
     this.conn = conn;
 
     conn.notificationHandler = (n) => {
+      if (this.conn !== conn) return;
       const f = mapNotification(n);
       if (f) this.emitFact(f);
     };
     conn.serverRequestHandler = (r) => {
+      if (this.conn !== conn) return;
       const f = mapServerRequest(r);
       if (f) this.emitFact(f);
     };
-    conn.closeHandler = () => this.handleExit(null);
+    conn.closeHandler = () => { if (this.conn === conn) this.handleExit(null); };
 
     const t = this.transportFactory.create((chunk) => conn.feed(chunk));
     transport = t;
-    t.onExit((code) => this.handleExit(code));
+    this.transport = t;
+    t.onExit(() => { if (this.conn === conn) conn.markClosed(); });
 
-    conn.call(CodexMethod.initialize, {
+    try { await conn.call(CodexMethod.initialize, {
       clientInfo: { name: "agentlink", title: "AgentLink", version: "0.1.0" },
-    }).then(
-      () => resolveReady(),
-      (e) => {
-        if (!this.stopped) console.error("[bridge] initialize failed:", e);
-        resolveReady();
-      },
-    );
-    await ready;
+    });
+      if (!this.stopped && this.conn === conn) this.ready = true;
+    } catch (e) {
+      conn.markClosed(); t.kill(); throw e;
+    }
   }
 
   private handleExit(code: number | null): void {
+    this.ready = false;
     if (this.stopped) return;
     if (this.restarting) return;
     this.restarting = true;
     console.warn(`[bridge] codex app-server exited (code=${code}), restarting in ${this.restartDelayMs}ms`);
     for (const cb of this.exitListeners) cb();
-    setTimeout(() => {
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (this.stopped) return;
       this.restarting = false;
       this.restartDelayMs = Math.min(this.restartDelayMs * 2, 10000);
       this.spawnAndInitialize().then(() => {
         this.restartDelayMs = 500;
-      });
+      }).catch((e) => console.warn("[bridge] restart initialize failed:", e.message));
     }, this.restartDelayMs);
   }
 

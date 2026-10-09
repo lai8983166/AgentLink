@@ -38,6 +38,8 @@ export function createApp(opts: {
   bridge: CodexBridge;
   webDist?: string;
   auditPath?: string;
+  /** 自动化测试禁用真实桌面管道，保证不触碰用户会话。 */
+  desktop?: false;
   ntfy?: NtfyConfig;
   /** 轮换后持久化回调（写配置文件） */
   onTokenRotate?: (newToken: string) => void;
@@ -62,20 +64,23 @@ export function createApp(opts: {
   registry.setLimitsMonitor(limits);
 
   // 桌面 IPC follower（任务 3.1）：观察/接管桌面持有会话
-  const desktop = new DesktopSessionManager(bus, approvals, {
+  const desktop = opts.desktop === false ? undefined : new DesktopSessionManager(bus, approvals, {
     controls,
     log: (...a: unknown[]) => console.log("[desktop]", ...a),
   });
-  desktop.limitsMonitor = limits;
-  approvals.desktopDelegate = {
-    decide: (sessionId, requestId, decision, kind) => desktop.decide(sessionId, requestId, decision, kind),
-  };
-  registry.setDesktopManager(desktop);
+  if (desktop) {
+    desktop.limitsMonitor = limits;
+    approvals.desktopDelegate = {
+      decide: (sessionId, requestId, decision, kind) => desktop.decide(sessionId, requestId, decision, kind),
+    };
+    registry.setDesktopManager(desktop);
+  }
 
   // REST
   app.route(
     "/",
-    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth, desktop, limits }),
+    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth, desktop, limits,
+      connectionHealth: () => ({ appServer: opts.bridge.ready ? "ready" : "disconnected", desktop: desktop?.connectionHealth().state ?? "disabled", lastDesktopSyncAt: desktop?.connectionHealth().lastSyncAt ?? null }) }),
   );
 
   // token 轮换（remote-access spec：轮换后旧 token 立即失效）

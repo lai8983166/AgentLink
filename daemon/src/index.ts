@@ -33,9 +33,9 @@ async function main() {
   }
 
   // codex 子进程就绪后再拉会话列表；失败不阻塞 HTTP 服务
+  await registry.start();
   bridge
     .start()
-    .then(() => registry.start())
     .catch((e) => {
       console.error("[daemon] codex bridge 启动失败（将自动重试）:", e.message);
     });

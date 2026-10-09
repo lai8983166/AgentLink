@@ -26,6 +26,7 @@ export interface ApiDeps {
   fs: FsService;
   /** 账户限额（状态 pill 数据源；缺省时 rateLimits 为 null） */
   limits?: { snapshot(): { primary: { resetsAt: number }; secondary: unknown } | null };
+  connectionHealth?: () => { appServer: string; desktop: string; lastDesktopSyncAt: number | null };
   desktop?: {
     observe(id: string, mode?: "observe" | "takeover"): Promise<void>;
     takeover(id: string): Promise<void>;
@@ -82,6 +83,7 @@ export function createApiRouter(deps: ApiDeps): Hono {
       latencyMs: null,
       rateLimits: deps.limits?.snapshot() ?? null,
       pendingApprovals: 0,
+      connections: deps.connectionHealth?.(),
     }),
   );
 

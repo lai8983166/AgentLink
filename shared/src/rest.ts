@@ -44,6 +44,7 @@ export const StatusResponse = z.object({
   latencyMs: z.number().nullable(),
   rateLimits: RateLimit.nullable(),
   pendingApprovals: z.number().int(),
+  connections: z.object({ appServer: z.string(), desktop: z.string(), lastDesktopSyncAt: z.number().nullable() }).optional(),
 });
 export type StatusResponse = z.infer<typeof StatusResponse>;
 

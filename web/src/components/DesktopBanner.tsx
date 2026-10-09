@@ -22,6 +22,7 @@ export function DesktopBanner(props: {
   const [busy, setBusy] = useState(false);
   const [ipcFailed, setIpcFailed] = useState(false);
   const [forking, setForking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // 已接管：不显示横幅（正常驾驶中）
   if (takenOver) {
@@ -48,10 +49,12 @@ export function DesktopBanner(props: {
 
   async function handleTakeover() {
     setBusy(true);
+    setError(null);
     try {
       await api.takeover(sessionId);
       onTakenOver();
     } catch (e) {
+      setError(e instanceof Error ? e.message : "接管失败，请重试");
       if (String(e).includes("IPC_OWNER_NOT_FOUND") || (e as { code?: string }).code === "IPC_OWNER_NOT_FOUND") {
         setIpcFailed(true);
       }
@@ -62,9 +65,12 @@ export function DesktopBanner(props: {
 
   async function handleFork() {
     setForking(true);
+    setError(null);
     try {
       const res = await api.fork(sessionId);
       onForked?.(res.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "创建接力会话失败，请重试");
     } finally {
       setForking(false);
     }
@@ -73,7 +79,7 @@ export function DesktopBanner(props: {
   if (ipcFailed) {
     return (
       <div style={{ ...banner, background: "var(--red-bg)", color: "var(--red)" }}>
-        <span>⚠️ 委托通道不可用（找不到会话拥有者）</span>
+        <span>⚠️ {error ?? "委托通道不可用（找不到会话拥有者）"}</span>
         <button
           className="btn ghost"
           style={{ height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 }}
@@ -89,7 +95,7 @@ export function DesktopBanner(props: {
   return (
     <div style={{ ...banner, background: "var(--gold)", color: "var(--text)" }}>
       <span>
-        ⏳ {desktopGone ? "电脑端连接不可用，请打开原会话后重试" : `${activeVia ?? "电脑端"}原会话 · 可观察或接管`}
+        ⏳ {error ?? (desktopGone ? "电脑端连接不可用，请打开原会话后重试" : `${activeVia ?? "电脑端"}原会话 · 可观察或接管`)}
       </span>
       <button
         className="btn"
