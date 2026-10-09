@@ -1,10 +1,11 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { useVisibleViewport } from "./visible-viewport";
+import { configureKeyboardLayout, keyboardDiagnosticReport, useVisibleViewport } from "./visible-viewport";
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); sessionStorage.clear(); document.body.innerHTML = ""; });
 
 function viewport() {
+  vi.stubGlobal("innerHeight", 800);
   const vv = Object.assign(new EventTarget(), { height: 800, offsetTop: 0, scale: 1 });
   vi.stubGlobal("visualViewport", vv);
   return vv;
@@ -51,5 +52,79 @@ describe("可见区域跟随", () => {
     expect(removeViewport).toHaveBeenCalledWith("scroll", expect.any(Function));
     expect(removeWindow).toHaveBeenCalledWith("resize", expect.any(Function));
     removeWindow.mockRestore();
+  });
+});
+
+function keyboard() {
+  const api = Object.assign(new EventTarget(), { overlaysContent: false, boundingRect: new DOMRect(0, 0, 0, 0) });
+  vi.stubGlobal("navigator", { userAgent: "test browser", virtualKeyboard: api });
+  return api;
+}
+
+describe("桌面安装模式键盘兼容", () => {
+  test("安装模式支持 API 时主动接管键盘遮挡；浏览器标签保持原生行为", () => {
+    const api = keyboard();
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    configureKeyboardLayout(); expect(api.overlaysContent).toBe(false);
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    configureKeyboardLayout(); expect(api.overlaysContent).toBe(true);
+  });
+  test("键盘覆盖页面且 VV 不缩小时按键盘上沿收缩，键盘关闭后恢复", () => {
+    viewport(); const api = keyboard();
+    const { result } = renderHook(useVisibleViewport);
+    act(() => { api.boundingRect = new DOMRect(0, 440, 390, 360); api.dispatchEvent(new Event("geometrychange")); });
+    expect(result.current.height).toBe(440);
+    act(() => { api.boundingRect = new DOMRect(0, 0, 0, 0); api.dispatchEvent(new Event("geometrychange")); });
+    expect(result.current.height).toBe(800);
+  });
+  test("VV 已缩小时不会再扣一次键盘高度，偏移与键盘边界组合正确", () => {
+    const vv = viewport(); const api = keyboard();
+    const { result } = renderHook(useVisibleViewport);
+    act(() => {
+      vv.height = 390; api.boundingRect = new DOMRect(0, 390, 390, 410);
+      api.dispatchEvent(new Event("geometrychange"));
+    });
+    expect(result.current.height).toBe(390);
+    act(() => { vv.offsetTop = 45; vv.dispatchEvent(new Event("scroll")); });
+    expect(result.current).toMatchObject({ top: 45, height: 345 });
+  });
+  test("窗口先缩小但 VV 仍旧时使用窗口尺寸", () => {
+    viewport(); const { result } = renderHook(useVisibleViewport);
+    act(() => { vi.stubGlobal("innerHeight", 350); window.dispatchEvent(new Event("resize")); });
+    expect(result.current.height).toBe(350);
+  });
+  test("初始缩放不是 1 时仍跟随键盘，之后的手势缩放保留原生平移", () => {
+    const vv = viewport(); vv.scale = 0.9;
+    const { result } = renderHook(useVisibleViewport);
+    act(() => { vv.height = 420; vv.dispatchEvent(new Event("resize")); });
+    expect(result.current.height).toBe(420);
+    act(() => { vv.scale = 1.8; vv.height = 200; vv.offsetTop = 50; vv.dispatchEvent(new Event("scroll")); });
+    expect(result.current).toMatchObject({ height: 420, top: 0 });
+  });
+  test("尺寸变化没有事件时，输入期间轮询补偿；卸载取消轮询", () => {
+    vi.useFakeTimers();
+    try {
+      const vv = viewport(); const { result, unmount } = renderHook(useVisibleViewport);
+      const input = document.createElement("input"); document.body.append(input);
+      act(() => input.focus());
+      act(() => { vv.height = 410; vi.advanceTimersByTime(150); });
+      expect(result.current.height).toBe(410);
+      act(() => { input.blur(); vv.height = 800; vi.advanceTimersByTime(150); });
+      expect(result.current.height).toBe(800);
+      unmount(); expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+  test("布局诊断保留几何数据，不包含输入文本、token 或会话 ID", () => {
+    viewport(); keyboard();
+    const { unmount } = renderHook(useVisibleViewport);
+    const input = document.createElement("input"); input.value = "secret user text"; input.id = "private-session-id";
+    localStorage.setItem("agentlink-token", "secret token"); document.body.append(input);
+    act(() => input.focus()); unmount();
+    const report = keyboardDiagnosticReport();
+    expect(JSON.parse(report).samples.length).toBeGreaterThan(0);
+    expect(report).toContain("fieldBottom");
+    expect(report).not.toContain("secret user text"); expect(report).not.toContain("secret token");
+    expect(report).not.toContain("private-session-id");
+    localStorage.removeItem("agentlink-token");
   });
 });

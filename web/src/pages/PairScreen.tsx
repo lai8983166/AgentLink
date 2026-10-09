@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { useVisibleViewport } from "../visible-viewport";
 
 /** 首次配对：粘贴 daemon token（remote-access spec） */
 export function PairScreen() {
+  const viewportStyle = useVisibleViewport();
   const setToken = useStore((s) => s.setToken);
   const [value, setValue] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -26,7 +28,7 @@ export function PairScreen() {
   }
 
   return (
-    <div style={{ height: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+    <div style={{ ...viewportStyle, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, overflowY: "auto" }}>
       <div
         style={{
           background: "var(--surface)",
@@ -54,7 +56,7 @@ export function PairScreen() {
             width: "100%",
             padding: 12,
             fontFamily: "var(--mono)",
-            fontSize: 14,
+            fontSize: 16,
             border: "1.5px solid var(--border)",
             borderRadius: 12,
             outline: "none",

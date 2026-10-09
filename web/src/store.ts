@@ -8,6 +8,8 @@ interface AgentLinkStore {
   clearToken: () => void;
   wsConnected: boolean;
   setWsConnected: (v: boolean) => void;
+  inputAtTop: boolean;
+  setInputAtTop: (value: boolean) => void;
 }
 
 export const useStore = create<AgentLinkStore>((set) => ({
@@ -22,6 +24,11 @@ export const useStore = create<AgentLinkStore>((set) => ({
   },
   wsConnected: false,
   setWsConnected: (v) => set({ wsConnected: v }),
+  inputAtTop: (() => { try { return localStorage.getItem("agentlink-input-at-top") === "true"; } catch { return false; } })(),
+  setInputAtTop: (value) => {
+    try { localStorage.setItem("agentlink-input-at-top", String(value)); } catch { /* Keep the current preference in memory. */ }
+    set({ inputAtTop: value });
+  },
 }));
 
 /** 会话页的滚动跟随状态（组件外持有，避免重渲染竞争） */
