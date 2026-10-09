@@ -87,6 +87,7 @@ describe("SessionRegistry 状态机", () => {
     // 最近有 rollout 写入 → activeElsewhere（正在电脑上使用）+ 占用方显示名
     expect(list.find((s) => s.id === "old1")?.activeElsewhere).toBe(true);
     expect(list.find((s) => s.id === "old1")?.activeVia).toBe("ChatGPT 桌面端");
+    expect(list.find((s) => s.id === "old1")?.desktopManaged).toBe(true);
     expect(list.find((s) => s.id === "old1")?.lastActivityAt).toBeGreaterThan(0);
   });
 
@@ -128,9 +129,9 @@ describe("SessionRegistry 状态机", () => {
     }
   });
 
-  test("resume：IPC 发现在桌面持有 → 不抢写权直接 SESSION_BUSY；无 owner 正常恢复", async () => {
-    const { reg } = await setup();
-    let ownerAlive = true;
+  test("resume：桌面原会话即使 owner 不可达也不抢写权；普通会话仍可恢复", async () => {
+    const { reg, fake } = await setup();
+    let ownerAlive: boolean | Error = true;
     reg.setDesktopManager({
       observe: async () => {},
       takeover: async () => {},
@@ -140,18 +141,26 @@ describe("SessionRegistry 状态机", () => {
       sendTurn: async () => {},
       interrupt: async () => {},
       historyFor: () => null,
-      ownerAlive: async () => ownerAlive,
+      ownerAlive: async () => {
+        if (ownerAlive instanceof Error) throw ownerAlive;
+        return ownerAlive;
+      },
       onSummaryChange: () => {},
     });
-    try {
-      await reg.resume("old1"); // app-server 侧本可恢复成功，但桌面在持有 → 拒绝
-      expect.unreachable();
-    } catch (e) {
-      expect(e instanceof DaemonError && e.code).toBe("SESSION_BUSY");
+    for (const state of [true, false, new Error("IPC_UNAVAILABLE")]) {
+      ownerAlive = state;
+      await expect(reg.resume("old1")).rejects.toMatchObject({ code: "SESSION_BUSY" });
     }
+    expect(fake.written.map((s) => JSON.parse(s).method)).not.toContain("thread/resume");
+    // 未知来源的会话也必须先确认 owner；检测失败不能当作无人持有。
+    await expect(reg.resume("ordinary")).rejects.toThrow("IPC_UNAVAILABLE");
+    expect(fake.written.map((s) => JSON.parse(s).method)).not.toContain("thread/resume");
+    ownerAlive = true;
+    await expect(reg.resume("ordinary")).rejects.toMatchObject({ code: "SESSION_BUSY" });
     ownerAlive = false;
-    const detail = await reg.resume("old1");
-    expect(detail.id).toBe("old1");
+    const detail = await reg.resume("ordinary");
+    expect(detail.id).toBe("ordinary");
+    expect(fake.written.map((s) => JSON.parse(s).method)).toContain("thread/resume");
   });
 
   test("create：白名单外路径拒绝", async () => {

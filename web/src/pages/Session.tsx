@@ -30,7 +30,8 @@ export function Session() {
   const [busyError, setBusyError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState(new Map<string, { req: PendingApprovalUI; resolved: { decision: string } | null }>());
   const [liveStatus, setLiveStatus] = useState<{ status: string; activity: string | null } | null>(null);
-  const [takenOver, setTakenOver] = useState(false);
+  const [takenOverId, setTakenOverId] = useState<string | null>(null);
+  const takenOver = takenOverId === sessionId;
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   const detailQ = useQuery({
@@ -38,25 +39,25 @@ export function Session() {
     queryFn: () => api.sessionDetail(sessionId),
   });
 
-  // 进入时：桌面持有 → observe（实时观察）；否则普通恢复（desktopGone 后可直接接）
+  // 桌面原会话只走 observe；占用标记变化/失联时也不能自动 resume 抢写权。
   // 摘要来源：优先列表缓存（首页已拉过，快）——detail 走 rollout 首拉可达 30s，
   // 先行 observe 让基准快照尽早落地，history.sync 到达即重拉 detail（快照直出，快）
   const summary =
     detailQ.data?.session ??
     queryClient
-      .getQueryData<{ sessions: Array<{ id: string; activeElsewhere: boolean; desktopGone: boolean }> }>(["sessions"])
+      .getQueryData<{ sessions: Array<{ id: string; activeElsewhere: boolean; desktopGone: boolean; desktopManaged?: boolean }> }>(["sessions"])
       ?.sessions.find((s) => s.id === sessionId);
   useEffect(() => {
     if (!summary) return;
-    if (summary.activeElsewhere && !summary.desktopGone) {
+    if (summary.desktopManaged || summary.activeElsewhere || takenOver) {
       api
         .observe(sessionId)
         .then(() => setBusyError(null))
         .catch((e) => {
           if ((e as { code?: string }).code === "IPC_OWNER_NOT_FOUND") {
-            setBusyError("找不到会话拥有者（桌面端可能刚关闭）");
+            setBusyError("电脑端连接不可用，请在 Codex 中打开原会话后重试");
           } else {
-            setBusyError(null);
+            setBusyError(e instanceof Error ? e.message : "电脑端连接失败，请重试");
           }
         });
       return;
@@ -71,12 +72,12 @@ export function Session() {
             .observe(sessionId)
             .then(() => setBusyError(null))
             .catch(() =>
-              setBusyError("会话仍被电脑端占用且观察通道不可用；若桌面端已关闭，请稍候重试"),
+              setBusyError("电脑端连接不可用，请在 Codex 中打开原会话后重试"),
             );
-        }
+        } else setBusyError(e instanceof Error ? e.message : "会话连接失败，请重试");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, summary?.id, summary?.activeElsewhere, summary?.desktopGone]);
+  }, [sessionId, summary?.id, summary?.desktopManaged, summary?.activeElsewhere, takenOver]);
 
   // WS 订阅：事件驱动更新
   useEffect(() => {
@@ -166,7 +167,7 @@ export function Session() {
   const session = detailQ.data?.session;
   const status = liveStatus?.status ?? session?.status ?? "idle";
   const activity = liveStatus?.activity ?? null;
-  const isDesktopBusy = !!session?.activeElsewhere && !session?.desktopGone;
+  const isDesktopBusy = !!session?.desktopManaged || (!!session?.activeElsewhere && !session?.desktopGone);
   const canDrive = !isDesktopBusy || takenOver;
 
   // 滚动跟随
@@ -249,14 +250,16 @@ export function Session() {
 
       {/* 桌面会话：观察/接管/兜底/谱系横幅（任务 5.1-5.3） */}
       <DesktopBanner
+        key={sessionId}
         sessionId={sessionId}
         activeElsewhere={!!session?.activeElsewhere}
         activeVia={session?.activeVia ?? null}
         desktopGone={!!session?.desktopGone}
+        desktopManaged={!!session?.desktopManaged}
         takenOver={takenOver}
         forkedFromId={session?.forkedFromId ?? null}
         forkedToId={session?.forkedToId ?? null}
-        onTakenOver={() => setTakenOver(true)}
+        onTakenOver={() => setTakenOverId(sessionId)}
         onForked={(newId) => {
           queryClient.invalidateQueries({ queryKey: ["sessions"] });
           navigate(`/${newId}`);

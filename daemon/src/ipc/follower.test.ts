@@ -6,6 +6,9 @@ import type { DesktopFact } from "./mapper";
 
 class FakePipe implements PipeLikeSocket {
   written: Buffer[] = [];
+  owner: string | null = "owner-1";
+  commandErrors: string[] = [];
+  replacementOwner: string | null = null;
   private dataCb: ((d: Buffer) => void) | null = null;
   private connectCb: (() => void) | null = null;
   on(event: string, cb: (...a: never[]) => void): unknown {
@@ -25,13 +28,19 @@ class FakePipe implements PipeLikeSocket {
     if (msg.type === "request" && msg.method === "initialize") {
       this.send({ type: "response", requestId: msg.requestId, result: { clientId: "al-1" } });
     } else if (msg.type === "request" && msg.method === "thread-owner-discovery") {
-      if (msg.params.conversationId === "gone") {
+      if (msg.params.conversationId === "gone" || !this.owner) {
         this.send({ type: "response", requestId: msg.requestId, resultType: "notFound" });
       } else {
-        this.send({ type: "response", requestId: msg.requestId, resultType: "success", handledByClientId: "owner-1" });
+        this.send({ type: "response", requestId: msg.requestId, resultType: "success", handledByClientId: this.owner });
       }
     } else if (msg.type === "request") {
-      this.send({ type: "response", requestId: msg.requestId, result: { ok: true } });
+      const error = this.commandErrors.shift();
+      if (error) {
+        if (this.replacementOwner) this.owner = this.replacementOwner;
+        this.send({ type: "response", requestId: msg.requestId, resultType: "error", error });
+      } else {
+        this.send({ type: "response", requestId: msg.requestId, result: { ok: true } });
+      }
     }
   }
   send(obj: unknown): void {
@@ -51,6 +60,11 @@ function setup() {
   client.connect();
   pipe.fireConnect();
   return { pipe, client };
+}
+
+function frames(pipe: FakePipe, method: string) {
+  return pipe.written.map((d) => JSON.parse(d.subarray(4).toString("utf-8")))
+    .filter((m) => m.method === method);
 }
 
 describe("IpcFollowerSession（2.1/2.3）", () => {
@@ -195,6 +209,36 @@ describe("IpcFollowerSession（2.1/2.3）", () => {
       approvalPolicy: "untrusted",
     });
     expect(sent.params.turnStart.request.input[0]).toMatchObject({ type: "text", text: "继续" });
+    expect(sent.params.turnStart.context.inheritThreadSettings).toBe(true);
+    expect(sent.params.turnStart.request.threadId).toBe("c1");
+  });
+
+  test("手机发送继承桌面当前权限，不复制历史轮次或写入默认审批策略", async () => {
+    const { pipe, client } = setup();
+    const f = new IpcFollowerSession(client, "c1");
+    await f.start();
+    await f.handleStateChange({
+      type: "snapshot",
+      conversationState: {
+        id: "c1", revision: 1,
+        latestThreadSettings: { approvalPolicy: "never" },
+        turnHistory: { history: { entitiesByKey: { old: {
+          turnId: "old", status: "completed", items: [],
+          params: {
+            approvalPolicy: "untrusted", sandboxPolicy: { type: "readOnly" },
+            permissions: ":read-only", approvalsReviewer: "user", model: "old-model",
+          },
+        } } } },
+      },
+    });
+    await f.startTurn({ text: "继续", clientUserMessageId: "inherit-1" });
+    const sent = frames(pipe, "thread-follower-start-turn")[0].params.turnStart;
+    expect(sent.context).toEqual({ inheritThreadSettings: true });
+    expect(sent.request).toEqual({
+      threadId: "c1", clientUserMessageId: "inherit-1",
+      input: [{ type: "text", text: "继续", text_elements: [] }],
+    });
+    f.stop();
   });
 
   test("审批决定与中断委托", async () => {
@@ -216,5 +260,72 @@ describe("IpcFollowerSession（2.1/2.3）", () => {
       mode: "user-stop",
       expectedTurnId: "t9",
     });
+  });
+
+  test("桌面 owner 更换后发送使用新地址并重建基准", async () => {
+    const { pipe, client } = setup();
+    const f = new IpcFollowerSession(client, "c1");
+    await f.start();
+    await f.handleStateChange({ type: "snapshot", conversationState: { id: "c1", revision: 5 } });
+    pipe.owner = "owner-2";
+    await f.startTurn({ text: "继续" });
+    expect(frames(pipe, "thread-follower-start-turn")[0].targetClientId).toBe("owner-2");
+    expect(f.lastState).toBeNull();
+    await f.handleStateChange({ type: "snapshot", conversationState: { id: "c1", revision: 1 } });
+    expect(f.lastState?.revision).toBe(1);
+    f.stop();
+  });
+
+  test("发送时 owner 消失，清除旧地址且不发送到失效客户端", async () => {
+    const { pipe, client } = setup();
+    const f = new IpcFollowerSession(client, "c1");
+    await f.start();
+    pipe.owner = null;
+    await expect(f.startTurn({ text: "继续" })).rejects.toThrow("在 Codex 中打开原会话");
+    expect(f.ownerClientId).toBeNull();
+    expect(frames(pipe, "thread-follower-start-turn")).toHaveLength(0);
+    f.stop();
+  });
+
+  test("路由 no-client-found 时重新发现并只重试一次，复用消息 ID", async () => {
+    const { pipe, client } = setup();
+    const f = new IpcFollowerSession(client, "c1");
+    await f.start();
+    pipe.commandErrors = ["no-client-found"];
+    pipe.replacementOwner = "owner-2";
+    await f.startTurn({ text: "继续" });
+    const sent = frames(pipe, "thread-follower-start-turn");
+    expect(sent.map((m) => m.targetClientId)).toEqual(["owner-1", "owner-2"]);
+    expect(sent[0].params.turnStart.request.clientUserMessageId)
+      .toBe(sent[1].params.turnStart.request.clientUserMessageId);
+    f.stop();
+  });
+
+  test("持续 no-client-found 报明确错误并标记失联，其他错误不自动重发", async () => {
+    const { pipe, client } = setup();
+    const f = new IpcFollowerSession(client, "c1");
+    await f.start();
+    const lost = vi.fn();
+    f.onOwnerLost = lost;
+    pipe.commandErrors = ["no-client-found", "no-client-found"];
+    await expect(f.startTurn({ text: "继续" })).rejects.toThrow("重新打开原会话");
+    expect(frames(pipe, "thread-follower-start-turn")).toHaveLength(2);
+    expect(f.ownerLost).toBe(true);
+    expect(lost).toHaveBeenCalledTimes(1);
+    pipe.commandErrors = ["request-version-mismatch"];
+    await expect(f.startTurn({ text: "再次继续" })).rejects.toThrow("request-version-mismatch");
+    expect(frames(pipe, "thread-follower-start-turn")).toHaveLength(3);
+    f.stop();
+  });
+
+  test("首次发现失败后可在同一 follower 上重试启动", async () => {
+    const { pipe, client } = setup();
+    const f = new IpcFollowerSession(client, "c1");
+    pipe.owner = null;
+    await expect(f.start()).rejects.toThrow("IPC_OWNER_NOT_FOUND");
+    pipe.owner = "owner-2";
+    await f.start();
+    expect(f.ownerClientId).toBe("owner-2");
+    f.stop();
   });
 });

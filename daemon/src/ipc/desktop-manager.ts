@@ -79,6 +79,8 @@ export class DesktopSessionManager {
   async observe(conversationId: string, mode: FollowerMode = "observe"): Promise<void> {
     const existing = this.sessions.get(conversationId);
     if (existing) {
+      await existing.start();
+      await existing.discover();
       if (mode === "takeover") existing.mode = "takeover";
       return;
     }
@@ -96,7 +98,13 @@ export class DesktopSessionManager {
       this.onSummaryChange?.(conversationId);
     };
     this.sessions.set(conversationId, follower);
-    await follower.start();
+    try {
+      await follower.start();
+    } catch (e) {
+      follower.stop();
+      this.sessions.delete(conversationId);
+      throw e;
+    }
     this.startLimitsPolling(conversationId);
   }
 
@@ -129,19 +137,23 @@ export class DesktopSessionManager {
   }
 
   /** 桌面/VS Code 当前是否持有该会话（IPC owner 发现）。
-   *  管道未连接/发现失败/无 owner → false（调用方回落原逻辑）。
+   *  只有明确的 no-client-found 才返回 false；管道异常/超时抛错，禁止抢写权。
    *  与 5 分钟时间戳启发式相比这是权威信号，可防止误抢闲置桌面会话的写权。 */
   async ownerAlive(conversationId: string): Promise<boolean> {
-    if (this.client && this.client.state !== "open") return false; // 管道已知断开
+    if (this.client && this.client.state !== "open") {
+      throw new Error("IPC_UNAVAILABLE: 桌面连接未就绪，无法确认会话占用状态，请稍后重试");
+    }
     try {
       const client = this.ensureClient();
       const res = (await client.callFull(IpcMethod.threadOwnerDiscovery, {
         hostId: "local",
         conversationId,
-      })) as { resultType?: string; handledByClientId?: string; error?: { message?: string } };
-      return !res.error && res.resultType === "success" && !!res.handledByClientId;
-    } catch {
-      return false;
+      })) as { resultType?: string; handledByClientId?: string; error?: unknown };
+      if (!res.error && res.resultType === "success" && res.handledByClientId) return true;
+      if (res.resultType === "error" && res.error === "no-client-found") return false;
+      throw new Error("桌面没有返回有效的拥有者检测结果");
+    } catch (e) {
+      throw new Error(`IPC_UNAVAILABLE: 无法确认会话占用状态，请稍后重试（${e instanceof Error ? e.message : String(e)}）`);
     }
   }
 
@@ -166,7 +178,7 @@ export class DesktopSessionManager {
 
   /** 接管态发消息（任务 3.3）：clientUserMessageId 幂等（60s 内同文本重试复用）。
    *  失败（额度用尽/桌面拒绝等）→ error 事件让手机立刻看到原因，而不是静默恢复输入框 */
-  async sendTurn(conversationId: string, text: string, approvalPolicy?: string): Promise<void> {
+  async sendTurn(conversationId: string, text: string): Promise<void> {
     const f = this.sessions.get(conversationId);
     if (!f || f.mode !== "takeover") throw new Error("IPC_NOT_TAKEN_OVER: 会话未接管");
     const prev = this.lastSend.get(conversationId);
@@ -175,7 +187,7 @@ export class DesktopSessionManager {
     const id = reuse ?? crypto.randomUUID();
     this.lastSend.set(conversationId, { id, text, at: now });
     try {
-      await f.startTurn({ text, clientUserMessageId: id, approvalPolicy });
+      await f.startTurn({ text, clientUserMessageId: id });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.bus.publish(conversationId, { type: "error", message: `指令发送失败：${msg}` });

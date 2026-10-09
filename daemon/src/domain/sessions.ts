@@ -46,11 +46,11 @@ export class SessionRegistry {
     has(id: string): boolean;
     isTakenOver(id: string): boolean;
     overlay(): Map<string, { status: SessionStatus | null; mode: string; desktopGone: boolean }>;
-    sendTurn(id: string, text: string, policy?: string): Promise<void>;
+    sendTurn(id: string, text: string): Promise<void>;
     interrupt(id: string): Promise<void>;
     /** 观察中会话的快照历史（完整直出，避免 diff 事件重复/截断） */
     historyFor(id: string): import("@agentlink/shared").HistoryItem[] | null;
-    /** 桌面/VS Code 当前是否持有该会话（IPC owner 发现；管道不可用返回 false 走原逻辑） */
+    /** 桌面/VS Code 当前是否持有；检测不可用必须抛错，不能当作无人持有。 */
     ownerAlive?(id: string): Promise<boolean>;
     /** 摘要变化回调（属性，由 registry 覆写接线） */
     onSummaryChange: (id: string) => void;
@@ -81,6 +81,7 @@ export class SessionRegistry {
     const takenOver = ov.mode === "takeover";
     return {
       ...base,
+      desktopManaged: true,
       status: ov.status ?? base.status,
       activeElsewhere: takenOver ? false : base.activeElsewhere,
       desktopGone: ov.desktopGone,
@@ -176,6 +177,7 @@ export class SessionRegistry {
         status: "idle",
         activeElsewhere,
         activeVia,
+        desktopManaged: /desktop|vscode/i.test(String(t.originator ?? "")) || /desktop|vscode/i.test(String(t.source ?? "")),
         forkedFromId: typeof t.forkedFromId === "string" ? t.forkedFromId : null,
         forkedToId: null, // 后代关系在 list() 时统一计算
         desktopGone: false,
@@ -302,6 +304,11 @@ export class SessionRegistry {
 
   async resume(id: string, policy?: ApprovalPolicy): Promise<SessionDetail> {
     const desired = policy ?? this.live.get(id)?.desiredPolicy ?? "on-request";
+    // 即使 IPC 暂时找不到 owner，桌面原会话也只能通过 follower 操作。
+    // 接管后 activeElsewhere=false、owner 丢失后 desktopGone=true 都不允许回落 resume。
+    if (this.rolloutIndex.get(id)?.desktopManaged || this.desktop?.has(id)) {
+      throw new DaemonError("SESSION_BUSY", "原会话由电脑端管理，请通过观察或接管连接；连接不可用时请在电脑端打开原会话");
+    }
     // 5 分钟时间戳启发式不可靠：桌面会话闲置时不报 busy，直接 resume 会把写权抢过来，
     // 桌面端被锁成只读（"已在另一个应用中打开"）。先问 IPC 谁持有，桌面/VS Code
     // 在持有 → 走 SESSION_BUSY，客户端既有逻辑会自动转观察模式。
@@ -327,8 +334,8 @@ export class SessionRegistry {
   async sendMessage(id: string, text: string): Promise<void> {
     // 桌面接管态：委托 IPC follower（任务 3.3，含 clientUserMessageId 幂等）
     if (this.desktop?.isTakenOver(id)) {
-      const policy = this.rolloutIndex.get(id)?.approvalPolicy ?? "on-request";
-      await this.desktop.sendTurn(id, text, policy);
+      // rollout 摘要里的默认审批策略不代表桌面的实际权限，不能用于覆盖原会话。
+      await this.desktop.sendTurn(id, text);
       const base = this.rolloutIndex.get(id);
       if (base) base.lastActivityAt = Date.now();
       return;

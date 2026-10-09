@@ -43,22 +43,27 @@ export class IpcFollowerSession {
     return this.opts.log ?? (() => {});
   }
 
-  /** 发现拥有者；失败抛 IPC_OWNER_NOT_FOUND（触发 fork 兜底） */
+  /** 发现当前拥有者；失败时清除旧地址，不能继续向失效的客户端发送。 */
   async discover(): Promise<string> {
     const res = (await this.client.callFull(IpcMethod.threadOwnerDiscovery, {
       hostId: "local",
       conversationId: this.conversationId,
     })) as { resultType?: string; handledByClientId?: string; error?: { message?: string } };
     if (res.error || res.resultType !== "success" || !res.handledByClientId) {
+      this.ownerClientId = null;
       this.ownerMisses++;
       if (this.ownerMisses >= OWNER_LOST_THRESHOLD && !this.ownerLost) {
         this.ownerLost = true;
         this.onOwnerLost();
       }
-      throw new Error(`IPC_OWNER_NOT_FOUND: ${res.error?.message ?? res.resultType ?? "no owner"}`);
+      throw new Error("IPC_OWNER_NOT_FOUND: 电脑端当前未持有这个会话，请在 Codex 中打开原会话后重试");
     }
     this.ownerMisses = 0;
     this.ownerLost = false;
+    if (this.ownerClientId !== res.handledByClientId) {
+      this.lastState = null;
+      this.suppressNextDiff = true;
+    }
     this.ownerClientId = res.handledByClientId;
     return res.handledByClientId;
   }
@@ -67,7 +72,10 @@ export class IpcFollowerSession {
   async start(): Promise<void> {
     if (this.startPromise) return this.startPromise;
     this.stopped = false;
-    this.startPromise = this.doStart();
+    this.startPromise = this.doStart().catch((e) => {
+      this.startPromise = null;
+      throw e;
+    });
     return this.startPromise;
   }
 
@@ -100,13 +108,7 @@ export class IpcFollowerSession {
 
   private async keepAlive(): Promise<void> {
     // 拥有者可能变化（桌面重开会话）：重新发现，变化则换目标
-    const owner = await this.discover();
-    if (owner !== this.ownerClientId) {
-      this.log(`[follower] owner 变化 ${this.ownerClientId} → ${owner}`);
-      this.ownerClientId = owner;
-      this.lastState = null; // 换 owner 后重建快照基准
-      this.suppressNextDiff = true; // 下个快照只作基准（否则全量差分回流撑爆缓冲/重复卡片）
-    }
+    await this.discover();
     this.sendFollowing(true);
   }
 
@@ -146,7 +148,6 @@ export class IpcFollowerSession {
         this.log(`[follower] snapshot revision 回退，忽略`);
         return;
       }
-      this.captureTemplate(change.conversationState);
       if (this.suppressNextDiff) {
         this.takeBaseline(next);
         return;
@@ -199,57 +200,63 @@ export class IpcFollowerSession {
 
   /* ============ 委托操作（接管态） ============ */
 
-  /** 最近一次快照的轮次模板（start-turn 用上一轮完整 params 为基底，实测必需） */
-  private turnTemplate: Record<string, unknown> | null = null;
-
-  /** 从快照提取模板（normalizeSnapshot 之外保留原始 params） */
-  captureTemplate(cs: ConversationState): void {
-    const entities = cs.turnHistory?.history?.entitiesByKey ?? {};
-    const last = Object.values(entities).pop();
-    if (last?.params && typeof last.params === "object") {
-      this.turnTemplate = structuredClone(last.params);
-    }
-  }
-
-  /** 构造 start-turn 请求（任务 3.4）：上一轮参数为模板 + 显式策略 + 幂等消息 ID */
+  /** 构造 start-turn 请求：由桌面继承当前设置，不复制历史轮次的权限/模型参数。 */
   buildTurnRequest(input: { text: string; clientUserMessageId?: string; approvalPolicy?: string }): {
     conversationId: string;
     turnStart: { request: Record<string, unknown>; context: { inheritThreadSettings: boolean } };
   } {
-    // 模板基底：克隆上一轮 params（模型/设置等），去掉会话专属附加上下文
-    const request: Record<string, unknown> = this.turnTemplate
-      ? { ...structuredClone(this.turnTemplate) }
-      : {};
-    delete request.additionalContext;
-    request.input = [{ type: "text", text: input.text, text_elements: [] }];
-    request.clientUserMessageId = input.clientUserMessageId ?? randomUUID();
+    const request: Record<string, unknown> = {
+      threadId: this.conversationId,
+      input: [{ type: "text", text: input.text, text_elements: [] }],
+      clientUserMessageId: input.clientUserMessageId ?? randomUUID(),
+    };
     if (input.approvalPolicy) request.approvalPolicy = input.approvalPolicy;
     return {
       conversationId: this.conversationId,
-      turnStart: { request, context: { inheritThreadSettings: false } },
+      turnStart: { request, context: { inheritThreadSettings: true } },
     };
   }
 
   async startTurn(input: { text: string; clientUserMessageId?: string; approvalPolicy?: string }): Promise<void> {
-    if (!this.ownerClientId) throw new Error("IPC_OWNER_NOT_FOUND: 未发现拥有者");
-    await this.client.call(IpcMethod.threadFollowerStartTurn, this.buildTurnRequest(input), this.ownerClientId);
+    // 重试必须复用同一消息 ID；只重试路由明确拒绝的 no-client-found。
+    const params = this.buildTurnRequest(input);
+    await this.delegate(IpcMethod.threadFollowerStartTurn, params);
+  }
+
+  private async delegate(method: string, params: unknown): Promise<void> {
+    await this.discover();
+    this.sendFollowing(true);
+    try {
+      await this.client.call(method, params, this.ownerClientId!);
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.includes("no-client-found")) throw e;
+      // 桌面窗口可能在发现和发送之间切换/重开，只重新发现并重试一次。
+      this.ownerClientId = null;
+      const owner = await this.discover();
+      this.sendFollowing(true);
+      try {
+        await this.client.call(method, params, owner);
+      } catch (retryError) {
+        if (!(retryError instanceof Error) || !retryError.message.includes("no-client-found")) throw retryError;
+        this.ownerClientId = null;
+        this.ownerLost = true;
+        this.onOwnerLost();
+        throw new Error("IPC_OWNER_NOT_FOUND: 电脑端无法接收这个会话的指令，请在 Codex 中重新打开原会话后重试");
+      }
+    }
   }
 
   async interruptTurn(expectedTurnId?: string): Promise<void> {
-    if (!this.ownerClientId) throw new Error("IPC_OWNER_NOT_FOUND: 未发现拥有者");
-    await this.client.call(
+    await this.delegate(
       IpcMethod.threadFollowerInterruptTurn,
       { conversationId: this.conversationId, mode: "user-stop", expectedTurnId },
-      this.ownerClientId,
     );
   }
 
   async decideApproval(requestId: string, decision: string): Promise<void> {
-    if (!this.ownerClientId) throw new Error("IPC_OWNER_NOT_FOUND: 未发现拥有者");
-    await this.client.call(
+    await this.delegate(
       IpcMethod.threadFollowerCommandApprovalDecision,
       { conversationId: this.conversationId, requestId, decision },
-      this.ownerClientId,
     );
   }
 }

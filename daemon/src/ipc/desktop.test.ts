@@ -16,6 +16,8 @@ import { DesktopSessionManager } from "./desktop-manager";
 /** 管理器测试用假管道：应答 + 可注入状态推送 */
 class FakePipe implements PipeLikeSocket {
   written: Buffer[] = [];
+  ownerAvailable = true;
+  discoveryError: unknown = "no-client-found";
   private dataCb: ((d: Buffer) => void) | null = null;
   private connectCb: (() => void) | null = null;
   on(event: string, cb: (...a: never[]) => void): unknown {
@@ -36,7 +38,9 @@ class FakePipe implements PipeLikeSocket {
     if (msg.method === "initialize") {
       this.send({ type: "response", requestId: msg.requestId, result: { clientId: "al-mgr" } });
     } else if (msg.method === "thread-owner-discovery") {
-      this.send({ type: "response", requestId: msg.requestId, resultType: "success", handledByClientId: "owner-1" });
+      this.send(this.ownerAvailable
+        ? { type: "response", requestId: msg.requestId, resultType: "success", handledByClientId: "owner-1" }
+        : { type: "response", requestId: msg.requestId, resultType: "error", error: this.discoveryError });
     } else {
       this.send({ type: "response", requestId: msg.requestId, result: { ok: true } });
     }
@@ -121,6 +125,21 @@ async function pushBase(pipe: Awaited<ReturnType<typeof setup>>["pipe"]) {
 }
 
 describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
+  test("ownerAlive：只有明确无 owner 才返回 false；检测异常或断线必须拒绝", async () => {
+    const { manager, pipe } = await setup();
+    const p = manager.ownerAlive("old1");
+    pipe.fireConnect();
+    expect(await p).toBe(true);
+    pipe.ownerAvailable = false;
+    expect(await manager.ownerAlive("old1")).toBe(false);
+    pipe.discoveryError = { message: "ipc closed" };
+    await expect(manager.ownerAlive("old1")).rejects.toThrow("IPC_UNAVAILABLE");
+    pipe.discoveryError = null;
+    await expect(manager.ownerAlive("old1")).rejects.toThrow("IPC_UNAVAILABLE");
+    (manager as unknown as { client: IpcClient }).client.disconnect();
+    await expect(manager.ownerAlive("old1")).rejects.toThrow("IPC_UNAVAILABLE");
+  });
+
   test("observe → 基准后快照差分事件流出（agent.message/状态/历史直出）", async () => {
     const { registry, pipe, events } = await setup();
     const p = registry.observe("old1");
@@ -146,6 +165,14 @@ describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
     await registry.sendMessage("old1", "继续干活"); // 60s 内同文本 → 复用幂等 ID
     const turns = pipe.frames().filter((m) => m.method === "thread-follower-start-turn");
     expect(turns).toHaveLength(2);
+    for (const turn of turns) {
+      const start = (turn.params as { turnStart: { request: Record<string, unknown>; context: Record<string, unknown> } }).turnStart;
+      expect(start.context.inheritThreadSettings).toBe(true);
+      expect(start.request).not.toHaveProperty("approvalPolicy");
+      expect(start.request).not.toHaveProperty("sandboxPolicy");
+      expect(start.request).not.toHaveProperty("permissions");
+      expect(start.request.threadId).toBe("old1");
+    }
     expect((turns[0] as { params: { turnStart: { request: { clientUserMessageId: string } } } }).params.turnStart.request.clientUserMessageId).toBe(
       (turns[1] as { params: { turnStart: { request: { clientUserMessageId: string } } } }).params.turnStart.request.clientUserMessageId,
     );
@@ -199,14 +226,28 @@ describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
     expect(resolved).toMatchObject({ approvalId: "r2", decision: "resolved_elsewhere" });
   });
 
-  test("owner 发现失败 → observe 抛 IPC_OWNER_NOT_FOUND（fork 兜底入口）", async () => {
-    const { registry, pipe } = await setup();
+  test("owner 发现失败不会残留观察会话，恢复后可以重新接管", async () => {
+    const { registry, manager, pipe } = await setup();
+    pipe.ownerAvailable = false;
     const p = registry.observe("nobody");
     pipe.fireConnect();
-    // 假管道对所有会话都返回 owner-1，这里改用不触发 discovery 成功的方式：
-    // 直接断言错误码映射逻辑存在（错误来自 follower.discover）
-    await p; // fake 总是成功，此用例仅验证 happy path 不炸
-    expect(true).toBe(true);
+    await expect(p).rejects.toThrow("IPC_OWNER_NOT_FOUND");
+    expect(manager.has("nobody")).toBe(false);
+    pipe.ownerAvailable = true;
+    await registry.takeover("nobody");
+    expect(manager.isTakenOver("nobody")).toBe(true);
+    manager.stop("nobody");
+  });
+
+  test("既有观察会话失去 owner 时接管不虚报成功", async () => {
+    const { registry, manager, pipe } = await setup();
+    const p = registry.observe("old1");
+    pipe.fireConnect();
+    await p;
+    pipe.ownerAvailable = false;
+    await expect(registry.takeover("old1")).rejects.toThrow("IPC_OWNER_NOT_FOUND");
+    expect(manager.isTakenOver("old1")).toBe(false);
+    manager.stop("old1");
   });
 
   test("fork 兜底：新会话带谱系，旧会话 forkedToId 指向新会话", async () => {

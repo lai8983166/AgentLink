@@ -11,13 +11,14 @@ export function DesktopBanner(props: {
   activeElsewhere: boolean;
   activeVia: string | null;
   desktopGone: boolean;
+  desktopManaged?: boolean;
   takenOver: boolean;
   forkedFromId: string | null;
   forkedToId: string | null;
   onTakenOver: () => void;
   onForked?: (newSessionId: string) => void;
 }) {
-  const { sessionId, activeElsewhere, activeVia, desktopGone, takenOver, forkedFromId, forkedToId, onTakenOver, onForked } = props;
+  const { sessionId, activeElsewhere, activeVia, desktopGone, desktopManaged, takenOver, forkedFromId, forkedToId, onTakenOver, onForked } = props;
   const [busy, setBusy] = useState(false);
   const [ipcFailed, setIpcFailed] = useState(false);
   const [forking, setForking] = useState(false);
@@ -43,8 +44,7 @@ export function DesktopBanner(props: {
     );
   }
 
-  // 桌面已关闭：可直接接管（普通恢复）
-  if (desktopGone || !activeElsewhere) return null;
+  if (!desktopManaged && (desktopGone || !activeElsewhere)) return null;
 
   async function handleTakeover() {
     setBusy(true);
@@ -89,7 +89,7 @@ export function DesktopBanner(props: {
   return (
     <div style={{ ...banner, background: "var(--gold)", color: "var(--text)" }}>
       <span>
-        ⏳ {activeVia ?? "电脑"}运行中 · 实时观察已连接
+        ⏳ {desktopGone ? "电脑端连接不可用，请打开原会话后重试" : `${activeVia ?? "电脑端"}原会话 · 可观察或接管`}
       </span>
       <button
         className="btn"
