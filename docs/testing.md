@@ -14,7 +14,7 @@ GitHub Actions 在 Windows 上对 push 和 pull request 执行相同检查，并
 
 ## 覆盖范围
 
-2026-10-09 本地结果：后端/共享包此前 149 项通过，2 项真实连接测试默认跳过（此前另行连接本机真实桌面运行，两项均通过）；本次键盘兼容修改后前端 84 项通过，浏览器 32 项通过，2 项触摸手势用例在桌面项目中明确跳过、在移动项目中通过。此前另行只读观察真实增量，3 条 patches 全部应用、未触发重订阅。本次未修改后端、未重跑后端测试。未测量覆盖率百分比。
+2026-10-09 本地结果：后端/共享包此前 149 项通过，2 项真实连接测试默认跳过（此前另行连接本机真实桌面运行，两项均通过）；本次键盘兼容修改后前端 85 项通过，浏览器合计 34 项通过，2 项触摸手势用例在桌面项目中明确跳过、在移动项目中通过。浏览器全量首次运行既有 32 项通过，新两项在布局已可见后过早停止诊断采样导致断言失败；增加等待布局提交后的采样，再单独重跑两项均通过。此前另行只读观察真实增量，3 条 patches 全部应用、未触发重订阅。本次未修改后端、未重跑后端测试。未测量覆盖率百分比。
 
 | 层级 | 重点验证 |
 | --- | --- |
@@ -28,7 +28,7 @@ GitHub Actions 在 Windows 上对 push 和 pull request 执行相同检查，并
 
 `e2e/mobile-usability.spec.ts` 的刷新用例单独拦截列表、连接状态和 WS，以固定空列表、长列表及失败/慢响应；触摸通过 Chromium CDP 的真实输入分发，验证非 passive 监听与滚动协商。键盘用例模拟独立的 VisualViewport 高度和 offsetTop，保留原窗口高度，并另测真实窗口 resize；测试不会弹出实体手机键盘。手机键盘可只缩小可见区域，相关 API 参考 [MDN VisualViewport](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport)。
 
-2026-10-09 已重建前端，并通过只读 HTTP 检查确认运行中的后台提供最新 bundle（首页、JS、版本文件及 Service Worker 均为 200），首页包含新的键盘缩放策略。当前构建号为 `2026-10-09T11:04:48.767Z`，JS 为 `/assets/index-CwirbiJb.js`。此次没有重启 daemon 或桌面应用；后台提供新版不能证明实体手机已加载新版。
+2026-10-09 已重建前端，并通过只读 HTTP 检查确认运行中的后台提供最新 bundle（首页、JS、版本文件及 Service Worker 均为 200），首页包含新的键盘缩放策略。当前构建号为 `2026-10-09T11:27:25.087Z`，JS 为 `/assets/index-D3LwQ6Ar.js`。此次没有重启 daemon 或桌面应用；后台提供新版不能证明实体手机已加载新版。
 
 ## 安装版 PWA 更新
 
@@ -42,13 +42,15 @@ GitHub Actions 在 Windows 上对 push 和 pull request 执行相同检查，并
 
 ## 安装模式的键盘布局
 
-用户反馈浏览器中的输入框已恢复，但 Android 桌面入口仍被键盘挡住。当前还没有实体手机的布局诊断，不能将缓存或某个浏览器行为认定为根因。新版本补充以下处理：viewport 声明 `interactive-widget=resizes-content`；安装模式支持 VirtualKeyboard API 时使用 `overlaysContent` 和实际键盘边界裁剪页面；其他环境结合窗口、布局及可见区域尺寸，并在输入期间轮询缺少事件的变化。键盘已导致区域缩小时不重复扣除高度。相关行为参考 [Chrome 键盘与 viewport 调整说明](https://developer.chrome.com/blog/viewport-resize-behavior) 和 [VirtualKeyboard API 文档](https://developer.chrome.com/docs/web-platform/virtual-keyboard)。
+用户反馈浏览器中的输入框已恢复，但 Android 桌面入口仍被键盘挡住。用户提供的真机诊断确认旧构建已更新，UA 为 Android 14 小米浏览器；`standalone: false`、`keyboardAPI: true`、`keyboardOverlay: false`，连续采样中窗口及布局高度均为 853，可见区域约 853.33，键盘尺寸为 0，输入框底部约 839。这确认了此前仅在安装模式启用 API 的条件漏判该入口；不能据此认定启用后小米浏览器一定报告有效键盘尺寸。
+
+当前处理：viewport 声明 `interactive-widget=resizes-content`；只要支持 VirtualKeyboard API，就尝试启用 `overlaysContent` 并使用实际键盘边界裁剪页面，不依赖安装标志或浏览器名称；API 缺失或设置被拒绝时保留原生处理。结合窗口、布局及可见区域尺寸，并在输入期间轮询缺少事件的变化。键盘已导致区域缩小时不重复扣除高度。相关行为参考 [Chrome 键盘与 viewport 调整说明](https://developer.chrome.com/blog/viewport-resize-behavior) 和 [VirtualKeyboard API 文档](https://developer.chrome.com/docs/web-platform/virtual-keyboard)。
 
 在桌面入口的设置页检查并更新页面后，先返回会话弹出键盘、输入文字，再进入设置 →“输入框仍被键盘遮挡？”→“复制布局诊断”。报告仅包含前端版本、浏览器、安装模式、键盘/页面尺寸及输入框位置；不记录输入内容、配对令牌、地址或会话 ID，也不自动上传。复制失败时可长按下方文本框全选复制。
 
 同一入口可以勾选“会话输入栏固定在顶部（兼容模式）”，让输入栏位于会话顶部，减少对设备键盘尺寸报告的依赖。默认关闭，选择保存在该入口的本地存储中，重新打开仍保留；取消勾选恢复底部输入栏。它是可用性回退方式，不能替代对键盘上方自动跟随的真机验收。
 
-`e2e/standalone-keyboard.spec.ts` 在两个 Chromium 项目中分别验证直接遮挡、无尺寸事件、创建任务及顶部兼容模式，共 8 项通过；使用生产构建和真实 Service Worker，模拟安装标志、键盘/可见区域信号，并增加实际覆盖输入框的元素，通过坐标及点击命中验证可见性、发送、草稿和设置保留。测试不会弹出实体 Android 键盘，也不等同于 WebAPK 安装。全部自动化通过后，真机恢复情况仍待用户确认。
+`e2e/standalone-keyboard.spec.ts` 在两个 Chromium 项目中分别验证 browser 模式的桌面快捷入口、直接遮挡、无尺寸事件、创建任务及顶部兼容模式，共 10 项通过。测试使用生产构建和真实 Service Worker，模拟安装标志、键盘/可见区域信号；只有启用 `overlaysContent` 后才提供键盘尺寸，以防漏判被模拟实现掩盖。增加实际覆盖输入框的元素，通过坐标及点击命中验证可见性、发送、草稿和设置保留。测试不会弹出实体 Android 键盘，也不等同于 WebAPK 安装。自动化通过后，当前修改的真机恢复情况仍待用户确认。
 
 ## 真实桌面兼容性（只读，可选）
 
