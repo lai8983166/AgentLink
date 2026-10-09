@@ -10,6 +10,7 @@ import { MarkdownLite } from "../components/Markdown";
 import { DesktopBanner } from "../components/DesktopBanner";
 import { applySessionEvent, mergeSessionDetail } from "../session-state";
 import { useMessageOutbox } from "../message-outbox";
+import { mergeOutgoingHistory } from "../message-history";
 
 const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -34,7 +35,10 @@ function SessionView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
   const [queue, setQueue] = useState(0);
-  const { input, setInput, sending, notice, uncertain, submit, recheck } = useMessageOutbox(sessionId);
+  const { input, setInput, messages, sending, notice, uncertain, submit, recheck } = useMessageOutbox(sessionId, {
+    history: () => queryClient.getQueryData<SessionDetailResponse>(["session", sessionId])?.session.history ?? [],
+    onAccepted: () => { queryClient.invalidateQueries({ queryKey: ["session", sessionId] }); },
+  });
   const wsConnected = useStore((s) => s.wsConnected);
   const [interrupting, setInterrupting] = useState(false);
   const [busyError, setBusyError] = useState<string | null>(null);
@@ -223,7 +227,7 @@ function SessionView() {
     if (canDrive && !sending) await submit();
   }
 
-  const history = useMemo(() => session?.history ?? [], [session]);
+  const history = useMemo(() => mergeOutgoingHistory(session?.history ?? [], messages), [session?.history, messages]);
   const approvalList = [...approvals.entries()];
 
   return (
@@ -320,12 +324,14 @@ function SessionView() {
       </div>
 
       {/* 对话流 */}
-      <div className="content" ref={scrollRef} onScroll={onScroll}>
+      <div className="content" data-testid="conversation-history" ref={scrollRef} onScroll={onScroll}>
         {history.map((h) => {
           if (h.type === "userMessage") {
             return (
               <div
                 key={h.id}
+                data-message-id={h.id}
+                data-message-type="user"
                 style={{
                   alignSelf: "flex-end",
                   maxWidth: "82%",
@@ -344,12 +350,15 @@ function SessionView() {
                 }}
               >
                 {h.text}
+                {h.deliveryState && <div style={{ fontSize: 10.5, opacity: 0.75, marginTop: 4 }}>
+                  {{ sending: "发送中", accepted: "电脑端已接收 · 等待同步", failed: "发送失败 · 草稿已保留", uncertain: "接收结果待确认" }[h.deliveryState]}
+                </div>}
               </div>
             );
           }
           if (h.type === "agentMessage") {
             return (
-              <div key={h.id} style={{ fontSize: 14, lineHeight: 1.75, margin: "14px 2px 0" }}>
+              <div key={h.id} data-message-id={h.id} data-message-type="agent" style={{ fontSize: 14, lineHeight: 1.75, margin: "14px 2px 0" }}>
                 <MarkdownLite text={h.text} />
               </div>
             );

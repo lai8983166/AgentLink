@@ -14,6 +14,8 @@ vi.mock("../runtime", () => ({
     observe: vi.fn().mockResolvedValue({ ok: true }),
     resume: vi.fn().mockResolvedValue({ ok: true }),
     takeover: vi.fn().mockResolvedValue({ ok: true }),
+    sendMessage: vi.fn(),
+    messageReceipt: vi.fn(),
   },
   ws: { subscribe: vi.fn((_id, sink) => { stream.sink = sink; return () => { stream.sink = null; }; }), onSnapshotRequired: null },
 }));
@@ -41,10 +43,26 @@ function mount(initial: SessionDetail) {
   return client;
 }
 
-beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.sessionDetail).mockImplementation(() => new Promise(() => {})); });
+beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); vi.mocked(api.sessionDetail).mockImplementation(() => new Promise(() => {})); });
 afterEach(cleanup);
 
 describe("原会话连接不会回落到独立 resume", () => {
+  test("回执和桌面指令迟到时立即显示用户消息；模型先到也不乱序、不重复", async () => {
+    let confirm!: (v: { ok: true }) => void;
+    vi.mocked(api.sendMessage).mockReturnValueOnce(new Promise((resolve) => { confirm = resolve; }));
+    mount(session({ desktopManaged: true, controlMode: "takeover", status: "running", history: [] }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "新指令" } });
+    fireEvent.click(screen.getByRole("button", { name: "↑" }));
+    const history = screen.getByTestId("conversation-history");
+    expect(history.textContent).toContain("新指令");
+    const clientMessageId = vi.mocked(api.sendMessage).mock.calls[0]![2]!;
+    act(() => stream.sink?.({ type: "agent.message", sessionId: "desktop-1", seq: 1, at: 1, itemId: "model", text: "新回复" }));
+    expect([...history.querySelectorAll("[data-message-type]")].map((el) => el.getAttribute("data-message-type"))).toEqual(["user", "agent"]);
+    await act(async () => { confirm({ ok: true }); });
+    act(() => stream.sink?.({ type: "user.message", sessionId: "desktop-1", seq: 2, at: 2, itemId: "server-user", clientMessageId, beforeItemId: "model", text: "新指令" }));
+    expect(history.querySelectorAll('[data-message-type="user"]')).toHaveLength(1);
+    await waitFor(() => expect([...history.querySelectorAll("[data-message-type]")].map((el) => el.getAttribute("data-message-id"))).toEqual(["server-user", "model"]));
+  });
   test("打开页面直接从快照恢复审批和接管，不依赖旧实时事件", async () => {
     const pending = { approvalId: "2", kind: "command" as const, command: "echo approve", cwd: "F:/project", reason: null, availableDecisions: ["accept"] };
     mount(session({ desktopManaged: true, status: "waiting_approval", controlMode: "takeover", approvals: [pending] }));

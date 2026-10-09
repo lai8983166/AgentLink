@@ -6,6 +6,22 @@ vi.mock("./runtime", () => ({ api: { sendMessage: vi.fn(), messageReceipt: vi.fn
 beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 afterEach(cleanup);
 describe("手机指令草稿与回执", () => {
+  test("等待 HTTP 回执时立即显示发送记录；接收后直到桌面同步仍保留，重开可恢复", async () => {
+    let confirm!: (value: { ok: true }) => void;
+    vi.mocked(api.sendMessage).mockReturnValueOnce(new Promise((resolve) => { confirm = resolve; }));
+    const { result, unmount } = renderHook(() => useMessageOutbox("s1"));
+    act(() => result.current.setInput("立即显示"));
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.submit(); });
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({ text: "立即显示", state: "sending" });
+    const id = result.current.messages[0]!.id;
+    await act(async () => { confirm({ ok: true }); await sending; });
+    expect(result.current.messages[0]).toMatchObject({ id, state: "accepted" });
+    unmount();
+    const reopened = renderHook(() => useMessageOutbox("s1"));
+    expect(reopened.result.current.messages[0]).toMatchObject({ id, text: "立即显示", state: "accepted" });
+  });
   test("HTTP 回执丢失但电脑已接收，查询确认成功，不能再次发送", async () => {
     vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error("network error"));
     vi.mocked(api.messageReceipt).mockResolvedValueOnce({ receipt: { clientMessageId: "m", state: "accepted", updatedAt: 1, error: null } });
