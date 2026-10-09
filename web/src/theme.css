@@ -131,6 +131,7 @@ body {
   text-overflow: ellipsis;
 }
 .icon-btn {
+  flex-shrink: 0;
   width: 34px;
   height: 34px;
   border-radius: 10px;
@@ -268,6 +269,18 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.session-list {
+  overflow-anchor: none;
+}
+.refresh-indicator {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  background: var(--surface-2);
 }
 .session-header {
   flex: 0 1 auto;
