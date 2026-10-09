@@ -8,6 +8,7 @@ import { NewTaskSheet } from "../components/NewTaskSheet";
 import { useEffect } from "react";
 import { mergeSessionList, mergeSessionSummary } from "../session-cache";
 import { usePullToRefresh } from "../pull-to-refresh";
+import { UpdateNotice } from "../components/UpdateNotice";
 
 /** 电脑上正被其他入口使用的会话排在运行中之后、已完成之前 */
 function effectiveOrder(s: SessionSummary): number {
@@ -150,6 +151,7 @@ export function Home() {
         </Link>
       </div>
 
+      <UpdateNotice />
       {(pull.distance > 0 || refreshing || refreshNote) && (
         <div className="refresh-indicator" role="status" style={{ height: Math.max(28, pull.distance / 2) }}>
           {refreshing ? "刷新中…" : pull.distance > 0 ? pull.armed ? "松开刷新" : "继续下拉以刷新" : refreshNote}

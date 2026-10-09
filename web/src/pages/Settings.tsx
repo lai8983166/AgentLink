@@ -2,9 +2,11 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../runtime";
 import { useStore } from "../store";
+import { applyAppUpdate, checkAppUpdate, useAppUpdate } from "../app-updater";
 
 /** 设置页（任务 7.7）：连接状态 / 通知说明 / 审计入口 / 解除配对 */
 export function Settings() {
+  const update = useAppUpdate();
   const clearToken = useStore((s) => s.clearToken);
   const wsConnected = useStore((s) => s.wsConnected);
   const statusQ = useQuery({ queryKey: ["status"], queryFn: () => api.status(), refetchInterval: 15000 });
@@ -40,6 +42,21 @@ export function Settings() {
                 {statusQ.data?.mode === "local" ? "本机" : statusQ.data?.mode === "relay" ? "VPS 中继" : "局域网"}
               </div>
             </div>
+          </div>
+        </div>
+
+        <div className="section-label">应用版本</div>
+        <div className="card" style={{ cursor: "default", fontSize: 12, lineHeight: 1.7 }}>
+          <div>当前前端版本：<span data-testid="app-build">{update.build}</span></div>
+          <div style={{ color: "var(--text-dim)", overflowWrap: "anywhere" }}>访问地址：{location.origin}</div>
+          <div style={{ color: "var(--text-dim)" }}>浏览器和桌面入口可在此核对版本与地址。</div>
+          <div role="status" style={{ margin: "8px 0" }}>
+            {update.applying ? "正在更新页面…" : update.checking ? "检查更新中…" : update.error ??
+              (update.available ? "有新版本可用，更新会重新加载页面" : update.checked ? "当前已是最新版本" : "尚未检查更新")}
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn ghost" style={{ flex: 1 }} disabled={update.checking || update.applying} onClick={() => { void checkAppUpdate(); }}>检查更新</button>
+            {update.available && <button className="btn" style={{ flex: 1 }} disabled={update.checking || update.applying} onClick={() => { void applyAppUpdate(); }}>更新页面</button>}
           </div>
         </div>
 

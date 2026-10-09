@@ -282,6 +282,16 @@ body {
   font-size: 12px;
   background: var(--surface-2);
 }
+.update-notice {
+  display: block;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--gold-bg);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-soft);
+}
 .session-header {
   flex: 0 1 auto;
   min-height: 0;

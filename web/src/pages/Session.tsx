@@ -12,6 +12,7 @@ import { applySessionEvent, mergeSessionDetail } from "../session-state";
 import { useMessageOutbox } from "../message-outbox";
 import { mergeOutgoingHistory } from "../message-history";
 import { useVisibleViewport } from "../visible-viewport";
+import { UpdateNotice } from "../components/UpdateNotice";
 
 const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -260,6 +261,7 @@ function SessionView() {
         )}
       </div>
 
+      <UpdateNotice />
       {busyError && (
         <div style={{ background: "var(--red-bg)", borderBottom: "1.5px solid var(--border)", padding: "10px 16px", fontSize: 12.5, color: "var(--red)", display: "flex", gap: 8, alignItems: "center" }}>
           <span>⏳</span>
