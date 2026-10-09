@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IpcClient } from "./client";
 import { BROADCAST_FOLLOWING, IpcMethod, type ConversationState } from "./protocol";
+import { applyConversationPatches } from "./patches";
 import {
   diffDesktopState,
   desktopStatusFact,
@@ -34,6 +35,7 @@ export class IpcFollowerSession {
   private followTimer: ReturnType<typeof setInterval> | null = null;
   private ownerMisses = 0;
   private stopped = false;
+  private rawState: ConversationState | null = null;
 
   constructor(
     private readonly client: IpcClient,
@@ -63,6 +65,7 @@ export class IpcFollowerSession {
     this.ownerMisses = 0;
     this.ownerLost = false;
     if (this.ownerClientId !== res.handledByClientId) {
+      this.rawState = null;
       this.lastState = null;
       this.lastStateAt = 0;
       this.suppressNextDiff = true;
@@ -101,6 +104,7 @@ export class IpcFollowerSession {
     this.followTimer = null;
     this.startPromise = null;
     this.lastState = null;
+    this.rawState = null;
     this.lastStateAt = 0;
     await this.start();
   }
@@ -135,6 +139,7 @@ export class IpcFollowerSession {
 
   /** 重建：取消跟随再重新跟随（revision 跳跃/未知增量时调用） */
   async resubscribe(): Promise<void> {
+    this.rawState = null;
     this.sendFollowing(false);
     await this.discover().catch(() => {});
     this.suppressNextDiff = true;
@@ -142,16 +147,18 @@ export class IpcFollowerSession {
   }
 
   /** 桌面推送的状态变化（snapshot 或增量）→ 事实流 */
-  async handleStateChange(change: { type?: string; conversationState?: ConversationState; revision?: number }): Promise<void> {
+  async handleStateChange(change: { type?: string; conversationState?: ConversationState; revision?: number; baseRevision?: number; patches?: unknown }): Promise<void> {
     if (process.env.AGENTLINK_DEBUG) {
       console.log(`[follower-dbg] conv=${this.conversationId.slice(0, 8)} suppress=${this.suppressNextDiff} change=${change.type} rev=${change.conversationState?.revision}`);
     }
     if (change.type === "snapshot" && change.conversationState) {
-      const next = normalizeSnapshot(change.conversationState);
+      const raw = { ...change.conversationState, revision: change.revision ?? change.conversationState.revision };
+      const next = normalizeSnapshot(raw);
       if (!revisionOk(this.lastState?.revision ?? null, next.revision)) {
         this.log(`[follower] snapshot revision 回退，忽略`);
         return;
       }
+      this.rawState = raw;
       if (this.suppressNextDiff) {
         this.takeBaseline(next);
         return;
@@ -162,15 +169,37 @@ export class IpcFollowerSession {
       this.emitFacts(facts);
       return;
     }
+    if (change.type === "patches") {
+      const revision = this.lastState?.revision;
+      if (revision != null && change.revision != null && change.revision <= revision) return;
+      if (!this.rawState || this.suppressNextDiff || revision == null || change.baseRevision !== revision || typeof change.revision !== "number" || !Number.isFinite(change.revision)) {
+        await this.resubscribe(); return;
+      }
+      try {
+        const raw = { ...applyConversationPatches(this.rawState, change.patches), revision: change.revision };
+        if (raw.id && raw.id !== this.conversationId) throw new Error("Mismatched conversation");
+        const next = normalizeSnapshot(raw);
+        const facts = diffDesktopState(this.lastState, next);
+        this.rawState = raw;
+        this.lastState = next;
+        this.lastStateAt = Date.now();
+        this.emitFacts(facts);
+      } catch {
+        await this.resubscribe();
+      }
+      return;
+    }
     // 非 snapshot 增量：能拿到完整 conversationState 就走差分，否则重订阅换快照
     if (change.conversationState) {
-      const next = normalizeSnapshot(change.conversationState);
+      const raw = { ...change.conversationState, revision: change.revision ?? change.conversationState.revision };
+      const next = normalizeSnapshot(raw);
       if (this.lastState && !revisionOk(this.lastState.revision, next.revision)) {
         this.log(`[follower] 增量 revision 跳跃（${this.lastState.revision} → ${next.revision}），重建快照`);
         this.lastState = null;
         await this.resubscribe();
         return;
       }
+      this.rawState = raw;
       if (this.suppressNextDiff) {
         // 重订阅/换 owner 后首个到达的是增量（也带全量状态）：同样只作基准，避免整史回流
         this.takeBaseline(next);

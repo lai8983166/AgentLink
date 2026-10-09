@@ -48,7 +48,7 @@ export interface DesktopState {
 /** 差分产出的事件（无 seq/at，由总线补齐） */
 export type DesktopFact =
   | { kind: "session.status"; status: "running" | "waiting_approval" | "done" | "error" | "idle" | "unknown"; activity: string | null }
-  | { kind: "user.message"; itemId: string; text: string; clientMessageId?: string }
+  | { kind: "user.message"; itemId: string; text: string; clientMessageId?: string; beforeItemId?: string }
   | { kind: "agent.message"; itemId: string; text: string }
   | { kind: "agent.delta"; itemId: string; delta: string }
   | { kind: "tool.started"; itemId: string; toolKind: "exec" | "fileChange"; target: string; cmd: string | null }
@@ -310,6 +310,7 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
   const facts: DesktopFact[] = [];
   const prevTurns = new Map((prev?.turns ?? []).map((t) => [t.turnId, t]));
   const seenItemKeys = new Set((prev?.turns ?? []).flatMap((t) => t.items.map((i) => i.key)));
+  const nextItems = next.turns.flatMap((t) => t.items);
   const prevText = new Map(
     (prev?.turns ?? []).flatMap((t) => t.items.map((i) => [i.key, i.text] as const)),
   );
@@ -321,7 +322,9 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
 
       if (item.type === "userMessage") {
         if (isNew && item.text) {
+          const following = nextItems.slice(nextItems.indexOf(item) + 1).find((i) => seenItemKeys.has(i.key));
           facts.push({ kind: "user.message", itemId: item.key, text: item.text,
+            ...(following ? { beforeItemId: following.key } : {}),
             ...(item.clientMessageId ? { clientMessageId: item.clientMessageId } : {}) });
           seenItemKeys.add(item.key);
         }

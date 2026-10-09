@@ -71,6 +71,46 @@ describe("IpcFollowerSession（2.1/2.3）", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  test("真实形态的增量衔接外层 revision，立即出消息，不重订阅或重拉完整历史", async () => {
+    const { pipe, client } = setup();
+    const f = new IpcFollowerSession(client, "c1"); await f.start();
+    await f.handleStateChange({ type: "snapshot", revision: 10, conversationState: {
+      id: "c1", turnHistory: { history: { entitiesByKey: { t: { turnId: "t", status: "inProgress", params: { clientUserMessageId: "phone-1" }, items: [] } } } },
+    } });
+    const facts: DesktopFact[] = []; f.onFacts = (events) => facts.push(...events);
+    const follows = frames(pipe, "thread-stream-following-changed").length;
+    await f.handleStateChange({ type: "patches", baseRevision: 10, revision: 11, patches: [
+      { op: "add", path: ["turnHistory", "history", "entitiesByKey", "t", "items", 0], value: { id: "model", type: "agentMessage", text: "收到" } },
+    ] });
+    expect(facts).toContainEqual({ kind: "agent.message", itemId: "model", text: "收到" });
+    await f.handleStateChange({ type: "patches", baseRevision: 11, revision: 12, patches: [
+      { op: "add", path: ["turnHistory", "history", "entitiesByKey", "t", "items", 0], value: { id: "server-1", type: "userMessage", text: "继续" } },
+    ] });
+    expect(facts).toContainEqual({ kind: "user.message", itemId: "server-1", clientMessageId: "phone-1", beforeItemId: "model", text: "继续" });
+    expect(facts).toContainEqual({ kind: "history.sync" });
+    expect(f.lastState?.turns[0]?.items.map((item) => item.key)).toEqual(["server-1", "model"]);
+    expect(frames(pipe, "thread-stream-following-changed")).toHaveLength(follows);
+    const count = facts.length;
+    await f.handleStateChange({ type: "patches", baseRevision: 11, revision: 12, patches: [{ op: "remove", path: ["turnHistory"] }] });
+    expect(facts).toHaveLength(count);
+    f.stop(); client.disconnect();
+  });
+
+  test("增量基准不一致或路径非法时保留现有历史并重建快照", async () => {
+    const { pipe, client } = setup(); const f = new IpcFollowerSession(client, "c1"); await f.start();
+    await f.handleStateChange({ type: "snapshot", revision: 1, conversationState: { id: "c1", title: "保留" } });
+    const before = frames(pipe, "thread-stream-following-changed").length;
+    await f.handleStateChange({ type: "patches", baseRevision: 0, revision: 2, patches: [] });
+    expect(frames(pipe, "thread-stream-following-changed").length).toBeGreaterThan(before);
+    expect(f.lastState?.title).toBe("保留");
+    await f.handleStateChange({ type: "snapshot", revision: 2, conversationState: { id: "c1", title: "恢复" } });
+    const restored = frames(pipe, "thread-stream-following-changed").length;
+    await f.handleStateChange({ type: "patches", baseRevision: 2, revision: 3, patches: [{ op: "replace", path: ["missing", "value"], value: 1 }] });
+    expect(frames(pipe, "thread-stream-following-changed").length).toBeGreaterThan(restored);
+    expect(f.lastState?.revision).toBe(2);
+    expect(f.lastState?.title).toBe("恢复"); f.stop(); client.disconnect();
+  });
+
   test("发现拥有者并开始跟随；续订按 10s 周期", async () => {
     const { pipe, client } = setup();
     const f = new IpcFollowerSession(client, "c1");
