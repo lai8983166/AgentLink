@@ -131,6 +131,15 @@ async function pushBase(pipe: Awaited<ReturnType<typeof setup>>["pipe"]) {
 }
 
 describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
+  test("following 等非状态广播不会触发重订阅循环", async () => {
+    const { manager, pipe, bridge } = await setup();
+    const observing = manager.observe("old1"); pipe.fireConnect(); await observing;
+    const count = pipe.frames().length;
+    pipe.send({ type: "broadcast", method: "thread-stream-following-changed", params: { conversationId: "old1", following: true } });
+    await Promise.resolve(); await Promise.resolve();
+    expect(pipe.frames()).toHaveLength(count);
+    manager.shutdown(); bridge.stop();
+  });
   test("旧历史查询等待期间桌面已同步，迟到查询不能用旧内容和新水位覆盖快照", async () => {
     const { bridge, registry, manager, pipe } = await setup();
     let finish!: (value: { data: [] }) => void;

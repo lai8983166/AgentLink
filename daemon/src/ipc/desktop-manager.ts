@@ -63,9 +63,11 @@ export class DesktopSessionManager {
     client.broadcastHandler = (b) => {
       const conv = b.params?.conversationId;
       const change = b.params?.change as
-        | { type?: string; conversationState?: never; revision?: number }
+        | { type?: string; conversationState?: never; revision?: number; baseRevision?: number; patches?: unknown }
         | undefined;
-      if (!conv) return;
+      // 同一管道还会广播 following/控制通知，它们没有状态 change。
+      // 不能把这些通知当成未知增量，否则会触发无意义的重订阅循环。
+      if (!conv || !change || typeof change.type !== "string") return;
       const follower = this.sessions.get(conv);
       if (!follower) return;
       // 交由 follower 处理（快照/增量/revision）
@@ -362,6 +364,7 @@ export class DesktopSessionManager {
           break;
         case "user.message":
           this.bus.publish(conversationId, { type: "user.message", itemId: f.itemId, text: f.text,
+            ...(f.beforeItemId ? { beforeItemId: f.beforeItemId } : {}),
             ...(f.clientMessageId ? { clientMessageId: f.clientMessageId } : {}) });
           break;
         case "agent.message":

@@ -40,6 +40,8 @@ export const SessionEvent = z.discriminatedUnion("type", [
     type: z.literal("user.message"),
     itemId: z.string(),
     clientMessageId: z.string().optional(),
+    /** 桌面顺序中已有的后继条目；迟到消息应插在它前面。 */
+    beforeItemId: z.string().optional(),
     text: z.string(),
   }),
   EventBase.extend({
