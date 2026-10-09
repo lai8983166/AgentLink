@@ -103,6 +103,14 @@ export const PendingApprovalSnapshot = z.object({
 });
 export type PendingApprovalSnapshot = z.infer<typeof PendingApprovalSnapshot>;
 
+export const MessageReceipt = z.object({
+  clientMessageId: z.string(),
+  state: z.enum(["sending", "accepted", "failed", "uncertain"]),
+  updatedAt: z.number(),
+  error: z.string().nullable(),
+});
+export type MessageReceipt = z.infer<typeof MessageReceipt>;
+
 /** 历史条目（会话详情快照） */
 export const HistoryItem = z.discriminatedUnion("type", [
   z.object({

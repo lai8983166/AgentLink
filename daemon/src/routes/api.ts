@@ -107,9 +107,12 @@ export function createApiRouter(deps: ApiDeps): Hono {
   api.post("/api/v1/sessions/:id/message", async (c) => {
     const body = SendMessageRequest.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(errorBody("VALIDATION_ERROR", "请求体不合法"), 400);
-    await deps.registry.sendMessage(c.req.param("id"), body.data.text);
-    return c.json({ ok: true });
+    const receipt = await deps.registry.sendMessage(c.req.param("id"), body.data.text, body.data.clientMessageId);
+    return c.json({ ok: true, receipt });
   });
+
+  api.get("/api/v1/sessions/:id/messages/:messageId", (c) =>
+    c.json({ receipt: deps.registry.messageReceipt(c.req.param("id"), c.req.param("messageId")) }));
 
   api.post("/api/v1/sessions/:id/interrupt", async (c) => {
     await deps.registry.interrupt(c.req.param("id"));

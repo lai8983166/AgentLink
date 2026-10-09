@@ -4,6 +4,7 @@ import type {
   SessionDetailResponse,
   SessionListResponse,
   StatusResponse,
+  MessageReceipt,
 } from "@agentlink/shared";
 
 /** daemon REST 客户端：token + 错误 envelope 解析 */
@@ -56,11 +57,14 @@ export class ApiClient {
   resume(id: string) {
     return this.request<{ session: unknown }>(`/api/v1/sessions/${id}/resume`, { method: "POST" });
   }
-  sendMessage(id: string, text: string) {
-    return this.request<{ ok: boolean }>(`/api/v1/sessions/${id}/message`, {
+  sendMessage(id: string, text: string, clientMessageId?: string) {
+    return this.request<{ ok: boolean; receipt?: MessageReceipt }>(`/api/v1/sessions/${id}/message`, {
       method: "POST",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, clientMessageId }),
     });
+  }
+  messageReceipt(id: string, clientMessageId: string) {
+    return this.request<{ receipt: MessageReceipt | null }>(`/api/v1/sessions/${id}/messages/${encodeURIComponent(clientMessageId)}`);
   }
   interrupt(id: string) {
     return this.request<{ ok: boolean }>(`/api/v1/sessions/${id}/interrupt`, { method: "POST" });

@@ -267,8 +267,9 @@ describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
     const p = registry.observe("old1", "takeover");
     pipe.fireConnect();
     await p;
-    await registry.sendMessage("old1", "继续干活");
-    await registry.sendMessage("old1", "继续干活"); // 60s 内同文本 → 复用幂等 ID
+    await registry.sendMessage("old1", "继续干活", "message-1");
+    await registry.sendMessage("old1", "继续干活", "message-1"); // 重试相同 ID 不再次委托
+    await registry.sendMessage("old1", "继续干活", "message-2"); // 同文本新意图仍可发送
     const turns = pipe.frames().filter((m) => m.method === "thread-follower-start-turn");
     expect(turns).toHaveLength(2);
     for (const turn of turns) {
@@ -279,9 +280,7 @@ describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
       expect(start.request).not.toHaveProperty("permissions");
       expect(start.request.threadId).toBe("old1");
     }
-    expect((turns[0] as { params: { turnStart: { request: { clientUserMessageId: string } } } }).params.turnStart.request.clientUserMessageId).toBe(
-      (turns[1] as { params: { turnStart: { request: { clientUserMessageId: string } } } }).params.turnStart.request.clientUserMessageId,
-    );
+    expect(turns.map((turn) => (turn.params as { turnStart: { request: { clientUserMessageId: string } } }).turnStart.request.clientUserMessageId)).toEqual(["message-1", "message-2"]);
     // app-server 侧不应收到 turn/start
     expect(fake.written.some((w) => w.includes("turn/start"))).toBe(false);
   });
