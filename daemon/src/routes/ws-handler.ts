@@ -29,9 +29,14 @@ export class WsConnectionHandler {
         this.send({ type: "pong" });
         return true;
       case "subscribe": {
+        this.bus.unsubscribe(m.sessionId, this.sessionListener);
+        if (m.serverEpoch && m.serverEpoch !== this.bus.epoch) {
+          this.send({ type: "snapshot.required", sessionId: m.sessionId, serverEpoch: this.bus.epoch });
+          return true;
+        }
         const result = this.bus.subscribe(m.sessionId, m.lastSeq ?? null, this.sessionListener);
         if (!result.ok) {
-          this.send({ type: "snapshot.required", sessionId: m.sessionId });
+          this.send({ type: "snapshot.required", sessionId: m.sessionId, serverEpoch: this.bus.epoch });
           return true;
         }
         this.subscribedSessions.add(m.sessionId);
@@ -39,6 +44,7 @@ export class WsConnectionHandler {
           type: "subscribed",
           sessionId: m.sessionId,
           fromSeq: (m.lastSeq ?? 0) + 1,
+          serverEpoch: this.bus.epoch,
         });
         for (const e of result.replay) this.send({ type: "event", event: e });
         return true;

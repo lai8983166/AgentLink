@@ -221,6 +221,20 @@ describe("REST API", () => {
 /* ============ 5.2 WS 处理器 ============ */
 
 describe("WsConnectionHandler", () => {
+  test("后台换代或客户端序号超前要求快照；再次订阅不会重复广播", () => {
+    const bus = new SessionEventBus();
+    const sent: ServerMessage[] = [];
+    const handler = new WsConnectionHandler(bus, (m) => sent.push(m));
+    handler.handle({ type: "subscribe", sessionId: "s1", lastSeq: 500, serverEpoch: "previous-daemon" });
+    expect(sent.at(-1)?.type).toBe("snapshot.required");
+    handler.handle({ type: "subscribe", sessionId: "s1", lastSeq: 500 });
+    expect(sent.at(-1)?.type).toBe("snapshot.required");
+    handler.handle({ type: "subscribe", sessionId: "s1", lastSeq: 0, serverEpoch: bus.epoch });
+    handler.handle({ type: "subscribe", sessionId: "s1", lastSeq: 0, serverEpoch: bus.epoch });
+    bus.publish("s1", { type: "error", message: "one" });
+    expect(sent.filter((m) => m.type === "event")).toHaveLength(1);
+    handler.close();
+  });
   test("subscribe → subscribed + 补发；实时事件推送；close 退订", () => {
     const bus = new SessionEventBus();
     const sent: ServerMessage[] = [];

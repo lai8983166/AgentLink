@@ -17,6 +17,7 @@ import {
 export const LIST_SCOPE = "__all__";
 
 const EventBase = z.object({
+  serverEpoch: z.string().optional(),
   sessionId: z.string(),
   seq: z.number().int().nonnegative(),
   at: z.number(),

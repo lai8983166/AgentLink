@@ -6,6 +6,32 @@ import { ControlStore } from "./control-store";
 import { SessionRegistry } from "./sessions";
 
 describe("指令接收回执和重启恢复", () => {
+  test("任务还在异步创建、尚未进入 live 时也必须阻止重启", async () => {
+    const store = new ControlStore();
+    let resolvePath!: (p: string) => void;
+    const registry = new SessionRegistry({ threadStart: async () => { throw new Error("test stop"); } } as never, {} as never, {} as never,
+      { isProjectAllowed: () => new Promise<string>((r) => { resolvePath = r; }) } as never, store);
+    const create = registry.create({ projectPath: "F:/test", approvalPolicy: "never", prompt: "task" });
+    expect(registry.prepareRestart().safe).toBe(false);
+    await Promise.resolve(); resolvePath("F:/test");
+    await expect(create).rejects.toThrow("test stop");
+    expect(registry.prepareRestart().safe).toBe(true);
+    store.close();
+  });
+  test("准备重启时拒绝进行中的发送，安全准备后禁止新指令直到取消", async () => {
+    const store = new ControlStore();
+    const registry = new SessionRegistry({} as never, {} as never, {} as never, {} as never, store);
+    let finish!: () => void;
+    registry.setDesktopManager({ isTakenOver: () => true, sendTurn: () => new Promise<void>((r) => { finish = r; }) } as never);
+    const sending = registry.sendMessage("s1", "task", "m1");
+    expect(registry.prepareRestart().safe).toBe(false);
+    await Promise.resolve(); await Promise.resolve(); finish(); await sending;
+    expect(registry.prepareRestart().safe).toBe(true);
+    expect(() => registry.sendMessage("s1", "new", "m2")).toThrow("安全重启");
+    registry.cancelRestart();
+    expect(registry.restartReadiness().safe).toBe(true);
+    store.close();
+  });
   test("同意图并发及成功重试只发送一次；相同文本新意图正常发送", async () => {
     const store = new ControlStore();
     let calls = 0;
