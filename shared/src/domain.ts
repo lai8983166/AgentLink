@@ -7,6 +7,7 @@ export const SessionStatus = z.enum([
   "done",
   "error",
   "idle",
+  "unknown",
 ]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
 
@@ -69,6 +70,8 @@ export const SessionSummary = z.object({
   cwd: z.string(),
   agent: z.literal("codex"),
   status: SessionStatus,
+  /** 权威状态的更新时间；用于防止旧列表响应覆盖较新的实时推送。 */
+  statusUpdatedAt: z.number().optional(),
   /** 会话正被其他入口（VS Code/ChatGPT 桌面端）使用：rollout 最近有写入 */
   activeElsewhere: z.boolean().default(false),
   /** 占用方显示名（"ChatGPT 桌面端" / "VS Code" 等），仅 activeElsewhere 时非空 */

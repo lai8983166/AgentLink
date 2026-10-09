@@ -19,11 +19,16 @@ export interface DesktopOverlayEntry {
   mode: FollowerMode;
   desktopGone: boolean;
   pendingApprovals?: number;
+  statusUpdatedAt?: number;
 }
 
 export class DesktopSessionManager {
   private client: IpcClient | null = null;
   private sessions = new Map<string, IpcFollowerSession>();
+  private clientReady = false;
+  private unavailable = new Map<string, number>();
+  private statusTimes = new Map<string, number>();
+  private summarySync: Promise<void> | null = null;
   /** 消息幂等：conversationId → 最近的 {id, text, at} */
   private lastSend = new Map<string, { id: string; text: string; at: number }>();
 
@@ -38,6 +43,7 @@ export class DesktopSessionManager {
     private readonly opts: {
       log?: (...a: unknown[]) => void;
       clientFactory?: () => IpcClient;
+      summaryTimeoutMs?: number;
     } = {},
   ) {}
 
@@ -64,12 +70,17 @@ export class DesktopSessionManager {
       );
     };
     client.onConnected = () => {
+      this.clientReady = true;
       // 管道重连：已建立的会话重新发现与订阅（重置基准快照）
       for (const [, f] of this.sessions) {
         f.restart().catch((e) => this.log(`[desktop] 重订阅失败:`, e.message));
       }
     };
     client.onStateChange = (s) => {
+      if (s !== "open") {
+        this.clientReady = false;
+        for (const id of this.sessions.keys()) this.markUnavailable(id);
+      }
       if (s === "open" && client.peerInfo) savePeerInfo(client.peerInfo);
     };
     client.connect();
@@ -94,10 +105,10 @@ export class DesktopSessionManager {
       this.approvals.expireSession(conversationId);
       this.bus.publish(conversationId, {
         type: "session.status",
-        status: "idle",
+        status: "unknown",
         activity: null,
       });
-      this.onSummaryChange?.(conversationId);
+      this.markUnavailable(conversationId);
     };
     this.sessions.set(conversationId, follower);
     try {
@@ -134,6 +145,51 @@ export class DesktopSessionManager {
     if (f) f.mode = "takeover";
   }
 
+  /** 首页即可订阅原会话；并发有界，等待首帧，整个列表最多等待两秒。 */
+  syncSummaries(ids: string[]): Promise<void> {
+    if (ids.length === 0) return Promise.resolve();
+    if (this.summarySync) return this.summarySync;
+    this.summarySync = this.doSyncSummaries(ids).finally(() => { this.summarySync = null; });
+    return this.summarySync;
+  }
+
+  private async doSyncSummaries(ids: string[]): Promise<void> {
+    this.ensureClient();
+    const deadline = Date.now() + (this.opts.summaryTimeoutMs ?? 2000);
+    const pause = () => new Promise<void>((r) => setTimeout(r, 20));
+    while (!this.clientReady && Date.now() < deadline) await pause();
+    if (!this.clientReady) return;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < ids.length && Date.now() < deadline && this.clientReady) {
+        const id = ids[cursor++]!;
+        const existing = this.sessions.get(id);
+        if (existing && this.isFresh(existing) && !this.unavailable.has(id)) continue;
+        try {
+          await this.observe(id);
+          while (Date.now() < deadline && !this.isFresh(this.sessions.get(id))) await pause();
+        } catch {
+          this.markUnavailable(id);
+        }
+      }
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(Array.from({ length: Math.min(8, ids.length) }, worker)),
+      new Promise<void>((r) => { timer = setTimeout(r, Math.max(0, deadline - Date.now())); }),
+    ]);
+    if (timer) clearTimeout(timer);
+  }
+
+  private isFresh(f?: IpcFollowerSession): boolean {
+    return !!f?.lastState && !f.ownerLost && this.clientReady && Date.now() - f.lastStateAt < 25_000;
+  }
+
+  private markUnavailable(id: string): void {
+    if (!this.unavailable.has(id)) this.unavailable.set(id, Date.now());
+    this.onSummaryChange(id);
+  }
+
   has(conversationId: string): boolean {
     return this.sessions.has(conversationId);
   }
@@ -166,12 +222,18 @@ export class DesktopSessionManager {
   /** 路由用：观察中的会话状态覆盖（列表徽章同步） */
   overlay(): Map<string, DesktopOverlayEntry> {
     const out = new Map<string, DesktopOverlayEntry>();
+    for (const [id, at] of this.unavailable) {
+      out.set(id, { status: "unknown", mode: "observe", desktopGone: true, pendingApprovals: 0, statusUpdatedAt: at });
+    }
     for (const [id, f] of this.sessions) {
+      const fresh = this.isFresh(f) && !this.unavailable.has(id);
       out.set(id, {
-        status: f.lastState ? desktopStatusFact(f.lastState).status : null,
+        status: fresh ? desktopStatusFact(f.lastState!).status : "unknown",
         mode: f.mode,
-        desktopGone: f.ownerLost,
-        pendingApprovals: f.lastState?.requests.length ?? 0,
+        desktopGone: f.ownerLost || !this.clientReady || this.unavailable.has(id),
+        pendingApprovals: fresh ? f.lastState?.requests.length ?? 0 : 0,
+        statusUpdatedAt: fresh ? this.statusTimes.get(id) ?? f.lastStateAt
+          : Math.max(this.unavailable.get(id) ?? 0, f.lastStateAt > 0 ? f.lastStateAt + 25_000 : 0),
       });
     }
     return out;
@@ -180,6 +242,8 @@ export class DesktopSessionManager {
   stop(conversationId: string): void {
     this.sessions.get(conversationId)?.stop();
     this.sessions.delete(conversationId);
+    this.unavailable.delete(conversationId);
+    this.statusTimes.delete(conversationId);
     this.stopLimitsPolling(conversationId);
   }
 
@@ -265,6 +329,8 @@ export class DesktopSessionManager {
     for (const f of facts) {
       switch (f.kind) {
         case "session.status":
+          this.unavailable.delete(conversationId);
+          this.statusTimes.set(conversationId, Math.max(Date.now(), (this.statusTimes.get(conversationId) ?? 0) + 1));
           this.bus.publish(conversationId, {
             type: "session.status",
             status: f.status,

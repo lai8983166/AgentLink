@@ -45,7 +45,8 @@ export class SessionRegistry {
     takeover(id: string): Promise<void>;
     has(id: string): boolean;
     isTakenOver(id: string): boolean;
-    overlay(): Map<string, { status: SessionStatus | null; mode: string; desktopGone: boolean; pendingApprovals?: number }>;
+    overlay(): Map<string, { status: SessionStatus | null; mode: string; desktopGone: boolean; pendingApprovals?: number; statusUpdatedAt?: number }>;
+    syncSummaries?(ids: string[]): Promise<void>;
     sendTurn(id: string, text: string): Promise<void>;
     interrupt(id: string): Promise<void>;
     /** 观察中会话的快照历史（完整直出，避免 diff 事件重复/截断） */
@@ -83,8 +84,9 @@ export class SessionRegistry {
       ...base,
       desktopManaged: true,
       status: ov.status ?? base.status,
+      statusUpdatedAt: ov.statusUpdatedAt ?? base.statusUpdatedAt,
       pendingApprovals: ov.pendingApprovals ?? base.pendingApprovals,
-      activeElsewhere: takenOver ? false : base.activeElsewhere,
+      activeElsewhere: !takenOver && (ov.status === "running" || ov.status === "waiting_approval"),
       desktopGone: ov.desktopGone,
     };
   }
@@ -123,6 +125,7 @@ export class SessionRegistry {
   /** 全量列表：实时会话 + rollout 既有会话（live 优先） */
   async list(): Promise<SessionSummary[]> {
     await this.refreshRollouts();
+    await this.desktop?.syncSummaries?.([...this.rolloutIndex.values()].filter((s) => s.desktopManaged).map((s) => s.id));
     const out = new Map<string, SessionSummary>();
     for (const [id, s] of this.rolloutIndex) {
       out.set(id, this.mergeDesktopOverlay(id) ?? s);
@@ -139,6 +142,7 @@ export class SessionRegistry {
       done: 2,
       error: 3,
       idle: 4,
+      unknown: 5,
     };
     return [...out.values()].sort(
       (a, b) =>
@@ -170,15 +174,17 @@ export class SessionRegistry {
       const lastActivityAt = updatedAtSec > 0 ? updatedAtSec * 1000 : 0;
       const activeElsewhere = updatedAtSec > 0 && Date.now() / 1000 - updatedAtSec < 300;
       const activeVia = activeElsewhere ? originatorLabel(t.originator) : null;
+      const desktopManaged = /desktop|vscode/i.test(String(t.originator ?? "")) || /desktop|vscode/i.test(String(t.source ?? ""));
       this.rolloutIndex.set(t.id, {
         id: t.id,
         title: ((t as { name?: string }).name || t.preview || "").slice(0, 40) || "既有会话",
         cwd,
         agent: "codex",
-        status: "idle",
+        status: desktopManaged ? "unknown" : "idle",
+        statusUpdatedAt: 0,
         activeElsewhere,
         activeVia,
-        desktopManaged: /desktop|vscode/i.test(String(t.originator ?? "")) || /desktop|vscode/i.test(String(t.source ?? "")),
+        desktopManaged,
         forkedFromId: typeof t.forkedFromId === "string" ? t.forkedFromId : null,
         forkedToId: null, // 后代关系在 list() 时统一计算
         desktopGone: false,

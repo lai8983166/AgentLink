@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, setSystemTime } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,7 @@ class FakePipe implements PipeLikeSocket {
   written: Buffer[] = [];
   ownerAvailable = true;
   discoveryError: unknown = "no-client-found";
+  autoSnapshot: unknown = null;
   private dataCb: ((d: Buffer) => void) | null = null;
   private connectCb: (() => void) | null = null;
   on(event: string, cb: (...a: never[]) => void): unknown {
@@ -34,6 +35,9 @@ class FakePipe implements PipeLikeSocket {
   private handle(data: Buffer): void {
     const len = data.readUInt32LE(0);
     const msg = JSON.parse(data.subarray(4, 4 + len).toString("utf-8"));
+    if (msg.type === "broadcast" && msg.params?.following && this.autoSnapshot) {
+      this.pushState(msg.params.conversationId, this.autoSnapshot);
+    }
     if (msg.type !== "request") return;
     if (msg.method === "initialize") {
       this.send({ type: "response", requestId: msg.requestId, result: { clientId: "al-mgr" } });
@@ -77,7 +81,7 @@ afterEach(() => {
   }
 });
 
-async function setup() {
+async function setup(opts: { summaryTimeoutMs?: number } = {}) {
   const fake = new FakeCodexServer();
   const bridge = new CodexBridge(fake);
   const bus = new SessionEventBus();
@@ -87,6 +91,7 @@ async function setup() {
   const registry = new SessionRegistry(bridge, bus, approvals, fs);
   const pipe = new FakePipe();
   const manager = new DesktopSessionManager(bus, approvals, {
+    ...opts,
     log: () => {},
     clientFactory: () => {
       const c = new IpcClient(() => pipe, { callTimeoutMs: 300, log: () => {} });
@@ -125,6 +130,56 @@ async function pushBase(pipe: Awaited<ReturnType<typeof setup>>["pipe"]) {
 }
 
 describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
+  test("管道未就绪时列表有整体等待上限，不会把未知状态当作空闲", async () => {
+    const { registry, manager } = await setup({ summaryTimeoutMs: 60 });
+    const started = Date.now();
+    const [first, concurrent] = await Promise.all([registry.list(), registry.list()]);
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(first.find((s) => s.id === "old1")?.status).toBe("unknown");
+    expect(concurrent.find((s) => s.id === "old1")?.status).toBe("unknown");
+    (manager as unknown as { client: IpcClient }).client.disconnect();
+  });
+
+  test("只打开首页：首次列表等待真实运行首帧，且不恢复原会话、不发任务", async () => {
+    const { registry, manager, pipe, fake } = await setup();
+    pipe.autoSnapshot = { type: "snapshot", conversationState: {
+      id: "old1", revision: 1, requests: [], turnHistory: { history: { entitiesByKey: {
+        active: { turnId: "active", status: "inProgress", items: [] },
+      } } },
+    } };
+    const list = registry.list();
+    await new Promise((r) => setTimeout(r, 0));
+    pipe.fireConnect();
+    expect((await list).find((s) => s.id === "old1")).toMatchObject({ status: "running" });
+    const methods = fake.written.map((s) => JSON.parse(s).method);
+    expect(methods).not.toContain("thread/resume");
+    expect(methods).not.toContain("turn/start");
+    const before = pipe.frames().filter((f) => f.method === "thread-owner-discovery").length;
+    await registry.list();
+    expect(pipe.frames().filter((f) => f.method === "thread-owner-discovery")).toHaveLength(before);
+    manager.stop("old1");
+  });
+
+  test("拥有者缺失返回未知，已知状态过期或管道断开也不能显示空闲", async () => {
+    const { registry, manager, pipe } = await setup();
+    pipe.ownerAvailable = false;
+    const list = registry.list();
+    await new Promise((r) => setTimeout(r, 0));
+    pipe.fireConnect();
+    expect((await list).find((s) => s.id === "old1")).toMatchObject({ status: "unknown", desktopGone: true });
+    pipe.ownerAvailable = true;
+    await registry.observe("old1");
+    pipe.pushState("old1", snap(1, []));
+    expect(manager.overlay().get("old1")?.status).toBe("done");
+    try {
+      setSystemTime(Date.now() + 26_000);
+      expect(manager.overlay().get("old1")?.status).toBe("unknown");
+    } finally { setSystemTime(); }
+    (manager as unknown as { client: IpcClient }).client.disconnect();
+    expect(manager.overlay().get("old1")).toMatchObject({ status: "unknown", desktopGone: true });
+    manager.stop("old1");
+  });
+
   test("首帧活动轮次立即显示运行中；列表轮询不覆盖状态，完成推送使用新快照", async () => {
     const { registry, manager, pipe, bus, events } = await setup();
     const summaries: Array<{ status: string }> = [];
