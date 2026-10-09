@@ -125,6 +125,44 @@ async function pushBase(pipe: Awaited<ReturnType<typeof setup>>["pipe"]) {
 }
 
 describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
+  test("首帧活动轮次立即显示运行中；列表轮询不覆盖状态，完成推送使用新快照", async () => {
+    const { registry, manager, pipe, bus, events } = await setup();
+    const summaries: Array<{ status: string }> = [];
+    bus.subscribeList((e) => { if (e.type === "session.updated") summaries.push(e.summary); });
+    const p = registry.observe("old1");
+    pipe.fireConnect();
+    await p;
+    pipe.pushState("old1", {
+      type: "snapshot", conversationState: { id: "old1", revision: 1,
+        turnHistory: { history: { entitiesByKey: {
+          active: { turnId: "active", status: "inProgress", items: [] },
+          tail: { status: "completed", items: [] },
+        } } }, requests: [],
+      },
+    });
+    expect(events.filter((e) => e.type === "session.status").at(-1)).toMatchObject({ status: "running" });
+    expect((await registry.list()).find((s) => s.id === "old1")?.status).toBe("running");
+    expect((await registry.list()).find((s) => s.id === "old1")?.status).toBe("running");
+    pipe.pushState("old1", snap(2, []));
+    expect(summaries.at(-1)?.status).toBe("done");
+    expect((await registry.detail("old1")).session.status).toBe("done");
+    manager.stop("old1");
+  });
+
+  test("首帧真实数字 ID 审批同步到列表和手机审批事件", async () => {
+    const { registry, manager, pipe, events } = await setup();
+    const p = registry.observe("old1");
+    pipe.fireConnect();
+    await p;
+    pipe.pushState("old1", snap(1, [], [{ id: 2, method: "item/commandExecution/requestApproval",
+      params: { command: "npm install", cwd: "F:/x", availableDecisions: ["accept", "decline"] },
+    }]));
+    expect(events.find((e) => e.type === "approval.request")).toMatchObject({ approvalId: "2", command: "npm install" });
+    const summary = (await registry.list()).find((s) => s.id === "old1");
+    expect(summary).toMatchObject({ status: "waiting_approval", pendingApprovals: 1 });
+    manager.stop("old1");
+  });
+
   test("ownerAlive：只有明确无 owner 才返回 false；检测异常或断线必须拒绝", async () => {
     const { manager, pipe } = await setup();
     const p = manager.ownerAlive("old1");

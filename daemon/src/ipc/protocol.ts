@@ -106,7 +106,7 @@ export interface IpcTurnItem {
 }
 
 export interface IpcPendingRequest {
-  id?: string;
+  id?: string | number;
   kind?: string;
   command?: string;
   cwd?: string;
