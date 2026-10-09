@@ -5,6 +5,36 @@ test.beforeEach(async ({ page, request }) => {
   await page.addInitScript(() => localStorage.setItem("agentlink-token", "isolated-e2e-token"));
 });
 
+test("回执和用户消息迟到、模型先到：发送立即显示、顺序稳定且桌面同步后不重复", async ({ page, request }) => {
+  await request.post("/__test__/control", { data: { type: "delayMessages" } });
+  await page.goto("/old1"); await page.getByRole("button", { name: "接管此会话" }).click();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/v1/sessions/old1/message", async (route) => {
+    const response = await route.fetch(); await gate; await route.fulfill({ response });
+  });
+  const history = page.getByTestId("conversation-history");
+  const rows = history.locator("[data-message-type]");
+  try {
+    await page.getByRole("textbox").fill("这条指令应立即出现"); await page.getByRole("button", { name: "↑" }).click();
+    await expect(history.locator('[data-message-type="user"]')).toContainText("这条指令应立即出现", { timeout: 1000 });
+    await expect(history.getByText("模型先到的回复", { exact: true })).toBeVisible();
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toHaveAttribute("data-message-type", "user");
+    await expect(rows.first()).toContainText("发送中");
+    release();
+    await expect(page.getByRole("textbox")).toHaveValue("");
+    await expect(rows.first()).toContainText("等待同步");
+    await request.post("/__test__/control", { data: { type: "flushMessages" } });
+    await expect(history.locator('[data-message-type="user"]')).toHaveCount(1);
+    await expect(rows.first()).toHaveAttribute("data-message-id", /^server-/);
+    await expect(rows.first()).toHaveAttribute("data-message-type", "user");
+    await page.reload(); await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toHaveAttribute("data-message-type", "user");
+    expect((await (await request.post("/__test__/metrics")).json()).sends).toHaveLength(1);
+  } finally { release(); }
+});
+
 test("首次状态、审批恢复、桌面拒绝可重试，文件审批使用正确通道", async ({ page, request }) => {
   await page.goto("/");
   await expect(page.getByText("等待审批", { exact: true })).toBeVisible();
