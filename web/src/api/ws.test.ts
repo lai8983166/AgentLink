@@ -35,6 +35,36 @@ function setup() {
 }
 
 describe("WsClient（任务 7.2）", () => {
+  test("快照临时失败会在当前连接重试，退订后取消重试", async () => {
+    const { client, sockets } = setup();
+    const unsubscribe = client.subscribe("s1", () => {});
+    const rebuild = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ latestSeq: 4, serverEpoch: "new" });
+    client.onSnapshotRequired = rebuild;
+    sockets[0]!.serverSend({ type: "snapshot.required", sessionId: "s1", serverEpoch: "new" });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(rebuild).toHaveBeenCalledTimes(2);
+    expect(sockets[0]!.sent.map((s) => JSON.parse(s))).toContainEqual({ type: "subscribe", sessionId: "s1", lastSeq: 4, serverEpoch: "new" });
+    rebuild.mockRejectedValue(new Error("offline"));
+    sockets[0]!.serverSend({ type: "snapshot.required", sessionId: "s1", serverEpoch: "new" });
+    await Promise.resolve(); unsubscribe();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(rebuild).toHaveBeenCalledTimes(3);
+    client.disconnect();
+  });
+  test("旧连接迟到的快照不能回滚新连接的 epoch 和序号", async () => {
+    const { client, sockets } = setup();
+    client.subscribe("s1", () => {});
+    let finishOld!: (value: { latestSeq: number; serverEpoch: string }) => void;
+    client.onSnapshotRequired = () => new Promise((resolve) => { finishOld = resolve; });
+    sockets[0]!.serverSend({ type: "snapshot.required", sessionId: "s1", serverEpoch: "old" });
+    client.disconnect(); client.connect(); sockets[1]!.onopen?.();
+    client.onSnapshotRequired = async () => ({ latestSeq: 2, serverEpoch: "new" });
+    sockets[1]!.serverSend({ type: "snapshot.required", sessionId: "s1", serverEpoch: "new" });
+    await Promise.resolve(); finishOld({ latestSeq: 500, serverEpoch: "old" }); await Promise.resolve();
+    client.subscribe("s1", () => {});
+    expect(JSON.parse(sockets[1]!.sent.at(-1)!)).toEqual({ type: "subscribe", sessionId: "s1", lastSeq: 2, serverEpoch: "new" });
+    client.disconnect();
+  });
   test("后台重启后重建快照，再从新序号恢复订阅，事件仍能继续到达", async () => {
     const { client, sockets } = setup();
     const seen: unknown[] = [];
