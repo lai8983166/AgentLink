@@ -64,7 +64,7 @@ export function createApp(opts: {
   });
   desktop.limitsMonitor = limits;
   approvals.desktopDelegate = {
-    decide: (sessionId, requestId, decision) => desktop.decide(sessionId, requestId, decision),
+    decide: (sessionId, requestId, decision, kind) => desktop.decide(sessionId, requestId, decision, kind),
   };
   registry.setDesktopManager(desktop);
 

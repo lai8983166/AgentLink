@@ -28,9 +28,10 @@ export class ApprovalService {
   private recentlyExpired = new Set<string>();
   /** 桌面审批幂等表：requestId → 已提交决定（任务 4.2） */
   private desktopDecided = new Map<string, ApprovalDecision>();
+  private desktopSubmitting = new Map<string, { decision: ApprovalDecision; result: Promise<void> }>();
   /** 桌面决定委托（由装配层注入，避免循环依赖） */
   desktopDelegate: {
-    decide: (sessionId: string, requestId: string, decision: ApprovalDecision) => Promise<void>;
+    decide: (sessionId: string, requestId: string, decision: ApprovalDecision, kind: ApprovalKind) => Promise<void>;
   } | null = null;
   private pendingChange: (sessionId: string, count: number) => void = () => {};
   private requestHooks = new Set<(a: PendingApproval) => void>();
@@ -95,12 +96,18 @@ export class ApprovalService {
   }
 
   /** 提交决定（任务 4.3 + 审计；桌面委托走幂等表） */
-  submit(sessionId: string, approvalId: string, decision: ApprovalDecision, project: string): void {
+  submit(sessionId: string, approvalId: string, decision: ApprovalDecision, project: string): Promise<void> {
+    const key = `${sessionId}:${approvalId}`;
+    const submitting = this.desktopSubmitting.get(key);
+    if (submitting) {
+      if (submitting.decision === decision) return submitting.result;
+      throw new DaemonError("APPROVAL_ALREADY_DECIDED", "该审批正在提交另一个决定");
+    }
     const a = this.get(sessionId, approvalId);
     if (!a) {
       // 桌面审批已提交过：幂等返回 / 冲突报错（条目已删，以幂等表为准）
-      const decided = this.desktopDecided.get(approvalId);
-      if (decided === decision) return;
+      const decided = this.desktopDecided.get(key);
+      if (decided === decision) return Promise.resolve();
       if (decided !== undefined) {
         throw new DaemonError("APPROVAL_ALREADY_DECIDED", `该审批已提交过决定 ${decided}`);
       }
@@ -114,15 +121,17 @@ export class ApprovalService {
 
     if (a.desktop) {
       // 幂等：同决定重复提交返回成功；不同决定明确报错（任务 4.2）
-      const decided = this.desktopDecided.get(a.desktop.requestId);
-      if (decided === decision) return;
+      const decided = this.desktopDecided.get(key);
+      if (decided === decision) return Promise.resolve();
       if (decided !== undefined) {
         throw new DaemonError("APPROVAL_ALREADY_DECIDED", `该审批已提交过决定 ${decided}`);
       }
-      const p = this.desktopDelegate?.decide(sessionId, a.desktop.requestId, decision);
-      // 同步语义：委托调用不等待桌面回执（差分事实会回推 resolved）
-      void p?.catch((e) => console.warn("[approvals] 桌面委托失败:", e.message));
-      this.desktopDecided.set(a.desktop.requestId, decision);
+      const delegate = this.desktopDelegate;
+      if (!delegate) throw new DaemonError("IPC_UNAVAILABLE", "桌面审批通道未连接，请稍后重试");
+      const result = Promise.resolve().then(async () => {
+        await delegate.decide(sessionId, a.desktop!.requestId, decision, a.kind);
+        if (this.pending.get(key) !== a) throw new DaemonError("APPROVAL_EXPIRED", "审批已随轮次结束作废");
+        this.desktopDecided.set(key, decision);
       this.audit.append({
         at: Date.now(),
         sessionId,
@@ -132,10 +141,12 @@ export class ApprovalService {
         decision,
         source: "desktop-delegate",
       });
-      this.pending.delete(`${sessionId}:${approvalId}`);
+      this.pending.delete(key);
       this.bus.publish(sessionId, { type: "approval.resolved", approvalId, decision });
       this.pendingChange(sessionId, this.countPending(sessionId));
-      return;
+      }).finally(() => { this.desktopSubmitting.delete(key); });
+      this.desktopSubmitting.set(key, { decision, result });
+      return result;
     }
 
     this.bridge.respondApproval(a.rpcId, decision);
@@ -151,6 +162,7 @@ export class ApprovalService {
     this.pending.delete(`${sessionId}:${approvalId}`);
     this.bus.publish(sessionId, { type: "approval.resolved", approvalId, decision });
     this.pendingChange(sessionId, this.countPending(sessionId));
+    return Promise.resolve();
   }
 
   /** 桌面审批登记（任务 4.1：requests[] 差分 → 事件 + 通知，requestId 去重） */
@@ -164,7 +176,7 @@ export class ApprovalService {
     availableDecisions: Array<string | Record<string, unknown>>;
   }): void {
     const key = `${f.sessionId}:${f.requestId}`;
-    if (this.pending.has(key) || this.desktopDecided.has(f.requestId)) return; // 去重
+    if (this.pending.has(key) || this.desktopDecided.has(key)) return; // 会话内去重
     const a: PendingApproval = {
       rpcId: -1,
       sessionId: f.sessionId,
@@ -195,9 +207,11 @@ export class ApprovalService {
   /** 桌面侧审批消失（电脑上处理掉或作废）→ resolved 事件（任务 4.1） */
   resolveDesktop(sessionId: string, requestId: string): void {
     const key = `${sessionId}:${requestId}`;
+    // 本次提交由回执确认；快照先移除请求时不能抢先宣告提交成功。
+    if (this.desktopSubmitting.has(key)) return;
     const a = this.pending.get(key);
     if (!a) return;
-    const decision = this.desktopDecided.get(requestId) ?? ("resolved_elsewhere" as const);
+    const decision = this.desktopDecided.get(key) ?? ("resolved_elsewhere" as const);
     this.pending.delete(key);
     this.recentlyExpired.add(key);
     this.bus.publish(sessionId, { type: "approval.resolved", approvalId: requestId, decision });
@@ -217,7 +231,7 @@ export class ApprovalService {
         decision: "expired" as const,
       });
       // 向 codex 侧拒绝挂起请求，防泄漏（若 codex 已丢弃则忽略）
-      this.bridge.rejectApproval(a.rpcId, "approval expired");
+      if (!a.desktop) this.bridge.rejectApproval(a.rpcId, "approval expired");
     }
     // 最近过期集合有界，防内存泄漏
     if (this.recentlyExpired.size > 200) {

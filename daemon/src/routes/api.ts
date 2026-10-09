@@ -155,7 +155,7 @@ export function createApiRouter(deps: ApiDeps): Hono {
     if (!body.success) return c.json(errorBody("VALIDATION_ERROR", "请求体不合法"), 400);
     const id = c.req.param("id");
     const { session } = await deps.registry.detail(id).catch(() => ({ session: null }));
-    deps.approvals.submit(id, c.req.param("aid"), body.data.decision, session?.cwd ?? session?.title ?? id);
+    await deps.approvals.submit(id, c.req.param("aid"), body.data.decision, session?.cwd ?? session?.title ?? id);
     return c.json({ ok: true });
   });
 

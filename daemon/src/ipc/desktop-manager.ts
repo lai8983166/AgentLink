@@ -273,10 +273,10 @@ export class DesktopSessionManager {
   }
 
   /** 审批决定委托（任务 4.2） */
-  async decide(conversationId: string, requestId: string, decision: string): Promise<void> {
+  async decide(conversationId: string, requestId: string, decision: string, kind: "command" | "fileChange" = "command"): Promise<void> {
     const f = this.sessions.get(conversationId);
     if (!f) throw new Error("IPC_NOT_TAKEN_OVER: 会话未接管");
-    await f.decideApproval(requestId, decision);
+    await f.decideApproval(requestId, decision, kind);
   }
 
   /** 观察中会话的历史：由最新快照直出（完整、无 diff 事件重复） */
