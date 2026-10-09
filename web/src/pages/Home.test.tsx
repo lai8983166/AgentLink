@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ListEvent, SessionListResponse, SessionSummary } from "@agentlink/shared";
@@ -57,5 +57,60 @@ describe("首页显示权威运行状态", () => {
     expect(await screen.findByText("状态待确认")).toBeTruthy();
     expect(screen.queryByText("空闲")).toBeNull();
     expect(screen.queryByText("运行中")).toBeNull();
+  });
+});
+
+describe("首页手动刷新", () => {
+  beforeEach(() => {
+    vi.mocked(api.sessions).mockReset().mockResolvedValue({ sessions: [] });
+    vi.mocked(api.status).mockReset().mockResolvedValue({ rateLimits: null } as Awaited<ReturnType<typeof api.status>>);
+  });
+
+  test("按钮同时刷新列表和连接状态，慢请求期间防止重复提交", async () => {
+    mount();
+    await screen.findByText(/还没有会话/);
+    await waitFor(() => expect(api.status).toHaveBeenCalledTimes(1));
+    let resolve!: (value: SessionListResponse) => void;
+    vi.mocked(api.sessions).mockReturnValueOnce(new Promise((r) => { resolve = r; }));
+    const button = screen.getByRole("button", { name: "刷新会话" });
+    fireEvent.click(button); fireEvent.click(button);
+    expect(button.getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("刷新中…");
+    await waitFor(() => expect(api.sessions).toHaveBeenCalledTimes(2));
+    expect(api.status).toHaveBeenCalledTimes(2);
+    await act(async () => { resolve({ sessions: [summary("running", 3)] }); });
+    expect(await screen.findByText("运行中")).toBeTruthy();
+    expect(await screen.findByText("已刷新")).toBeTruthy();
+    expect(button.getAttribute("disabled")).toBeNull();
+  });
+
+  test("首次加载失败仍可下拉刷新，显示准确结果并恢复列表", async () => {
+    vi.mocked(api.sessions).mockRejectedValueOnce(new Error("offline"));
+    mount();
+    await screen.findByText(/加载失败/);
+    expect(screen.queryByText(/还没有会话/)).toBeNull();
+    vi.mocked(api.sessions).mockResolvedValueOnce({ sessions: [summary("running", 4)] });
+    const list = screen.getByTestId("session-list");
+    const touch = (y: number) => ({ identifier: 1, clientX: 10, clientY: y });
+    fireEvent.touchStart(list, { touches: [touch(100)] });
+    fireEvent.touchMove(list, { touches: [touch(190)], cancelable: true });
+    expect(screen.getByText("松开刷新")).toBeTruthy();
+    fireEvent.touchEnd(list, { touches: [] });
+    expect(await screen.findByText("运行中")).toBeTruthy();
+    expect(await screen.findByText("已刷新")).toBeTruthy();
+    expect(api.sessions).toHaveBeenCalledTimes(2);
+  });
+
+  test("仅连接状态刷新失败也显示失败，下次重试可恢复且保留已有会话", async () => {
+    vi.mocked(api.sessions).mockResolvedValue({ sessions: [summary("running", 4)] });
+    mount(); await screen.findByText("运行中");
+    vi.mocked(api.status).mockRejectedValueOnce(new Error("offline"));
+    fireEvent.click(screen.getByRole("button", { name: "刷新会话" }));
+    expect(await screen.findByText("刷新失败，请重试")).toBeTruthy();
+    expect(screen.getByText("运行中")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "刷新会话" }));
+    expect(await screen.findByText("已刷新")).toBeTruthy();
+    expect(api.sessions).toHaveBeenCalledTimes(3);
+    expect(api.status).toHaveBeenCalledTimes(3);
   });
 });

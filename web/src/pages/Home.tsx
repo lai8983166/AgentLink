@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ListEvent, SessionSummary, SessionListResponse } from "@agentlink/shared";
@@ -7,6 +7,7 @@ import { STATUS_ORDER, useStore } from "../store";
 import { NewTaskSheet } from "../components/NewTaskSheet";
 import { useEffect } from "react";
 import { mergeSessionList, mergeSessionSummary } from "../session-cache";
+import { usePullToRefresh } from "../pull-to-refresh";
 
 /** 电脑上正被其他入口使用的会话排在运行中之后、已完成之前 */
 function effectiveOrder(s: SessionSummary): number {
@@ -18,6 +19,10 @@ export function Home() {
   const queryClient = useQueryClient();
   const wsConnected = useStore((s) => s.wsConnected);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const refreshBusy = useRef(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
 
   const sessionsQ = useQuery({
     queryKey: ["sessions"],
@@ -34,6 +39,24 @@ export function Home() {
     queryFn: () => api.status(),
     refetchInterval: 15000,
   });
+
+  async function refresh() {
+    if (refreshBusy.current) return;
+    refreshBusy.current = true;
+    setRefreshing(true);
+    setRefreshNote(null);
+    try {
+      const results = await Promise.allSettled([
+        sessionsQ.refetch({ cancelRefetch: false }), statusQ.refetch({ cancelRefetch: false }),
+      ]);
+      const failed = results.some((result) => result.status === "rejected" || result.value.isError);
+      setRefreshNote(failed ? "刷新失败，请重试" : "已刷新");
+    } finally {
+      refreshBusy.current = false;
+      setRefreshing(false);
+    }
+  }
+  const pull = usePullToRefresh(listRef, refresh, refreshing);
 
   // 列表级事件：增量更新缓存（WS 驱动，轮询兜底）；账户限额 → 状态缓存
   useEffect(() => {
@@ -119,12 +142,20 @@ export function Home() {
               })()}
           </div>
         </div>
-        <Link to="/settings" className="icon-btn">
+        <button className="icon-btn" aria-label="刷新会话" title="刷新会话" disabled={refreshing} onClick={refresh}>
+          ↻
+        </button>
+        <Link to="/settings" className="icon-btn" aria-label="设置">
           ⚙
         </Link>
       </div>
 
-      <div className="content">
+      {(pull.distance > 0 || refreshing || refreshNote) && (
+        <div className="refresh-indicator" role="status" style={{ height: Math.max(28, pull.distance / 2) }}>
+          {refreshing ? "刷新中…" : pull.distance > 0 ? pull.armed ? "松开刷新" : "继续下拉以刷新" : refreshNote}
+        </div>
+      )}
+      <div className="content session-list" data-testid="session-list" ref={listRef} aria-busy={refreshing}>
         {waiting.length > 0 && (
           <Link
             to={`/${waiting[0]!.id}`}
@@ -161,8 +192,11 @@ export function Home() {
         ))}
 
         {sessionsQ.isLoading && <div className="empty-note">加载中…</div>}
-        {sessionsQ.isError && <div className="empty-note">加载失败，下拉重试</div>}
-        {!sessionsQ.isLoading && sessions.length === 0 && (
+        {sessionsQ.isError && <div className="empty-note">
+          加载失败，可下拉或点击刷新重试
+          <button className="btn ghost" style={{ margin: "10px auto" }} disabled={refreshing} onClick={refresh}>重试加载</button>
+        </div>}
+        {!sessionsQ.isLoading && !sessionsQ.isError && sessions.length === 0 && (
           <div className="empty-note">还没有会话 · 点右下角 ＋ 派个任务</div>
         )}
       </div>
