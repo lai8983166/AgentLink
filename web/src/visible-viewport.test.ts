@@ -62,12 +62,24 @@ function keyboard() {
 }
 
 describe("桌面安装模式键盘兼容", () => {
-  test("安装模式支持 API 时主动接管键盘遮挡；浏览器标签保持原生行为", () => {
+  test("API 支持时启用键盘边界，不依赖桌面入口是否报告安装模式", () => {
     const api = keyboard();
     vi.stubGlobal("matchMedia", () => ({ matches: false }));
-    configureKeyboardLayout(); expect(api.overlaysContent).toBe(false);
+    configureKeyboardLayout(); expect(api.overlaysContent).toBe(true);
+    api.overlaysContent = false;
     vi.stubGlobal("matchMedia", () => ({ matches: true }));
     configureKeyboardLayout(); expect(api.overlaysContent).toBe(true);
+  });
+  test("API 缺失或拒绝设置时不阻断启动，仍跟随原生区域缩小", () => {
+    const vv = viewport();
+    vi.stubGlobal("navigator", { userAgent: "test browser" });
+    expect(configureKeyboardLayout).not.toThrow();
+    const api = keyboard();
+    Object.defineProperty(api, "overlaysContent", { get: () => false, set: () => { throw new Error("unavailable"); } });
+    expect(configureKeyboardLayout).not.toThrow();
+    const { result } = renderHook(useVisibleViewport);
+    act(() => { vv.height = 410; vv.dispatchEvent(new Event("resize")); });
+    expect(result.current.height).toBe(410);
   });
   test("键盘覆盖页面且 VV 不缩小时按键盘上沿收缩，键盘关闭后恢复", () => {
     viewport(); const api = keyboard();
