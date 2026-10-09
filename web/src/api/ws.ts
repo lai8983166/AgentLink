@@ -33,6 +33,7 @@ export class WsClient {
   private listSinks = new Set<ListSink>();
   private lastSeq = new Map<string, number>();
   private epochs = new Map<string, string>();
+  private recoveries = new Map<string, { socket: FakeableSocket; epoch?: string; attempt: number; timer?: ReturnType<typeof setTimeout> }>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffMs = 1000;
   private shouldConnect = false;
@@ -52,6 +53,7 @@ export class WsClient {
 
   disconnect(): void {
     this.shouldConnect = false;
+    this.cancelRecoveries();
     this.stopHeartbeat();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
@@ -79,6 +81,7 @@ export class WsClient {
     };
     socket.onclose = () => {
       if (this.socket !== socket) return;
+      this.cancelRecoveries();
       this.socket = null;
       this.stopHeartbeat();
       this.setState("closed");
@@ -135,6 +138,41 @@ export class WsClient {
     this.rawSend({ type: "subscribe", sessionId, lastSeq: seq ?? null, ...(serverEpoch ? { serverEpoch } : {}) });
   }
 
+  private cancelRecoveries(sessionId?: string): void {
+    for (const [id, recovery] of this.recoveries) {
+      if (sessionId && id !== sessionId) continue;
+      if (recovery.timer) clearTimeout(recovery.timer);
+      this.recoveries.delete(id);
+    }
+  }
+
+  private recoverSnapshot(sessionId: string, epoch?: string): void {
+    if (!this.socket || !this.sessionSinks.has(sessionId)) return;
+    const pending = this.recoveries.get(sessionId);
+    if (pending?.socket === this.socket && pending.epoch === epoch) return;
+    this.cancelRecoveries(sessionId);
+    const recovery = { socket: this.socket, epoch, attempt: 0, timer: undefined as ReturnType<typeof setTimeout> | undefined };
+    this.recoveries.set(sessionId, recovery);
+    const current = () => this.recoveries.get(sessionId) === recovery && this.socket === recovery.socket && this.state === "open";
+    const rebuild = async () => {
+      try {
+        const snapshot = await this.onSnapshotRequired(sessionId);
+        if (!current()) return;
+        if (epoch && snapshot?.serverEpoch && snapshot.serverEpoch !== epoch) throw new Error("快照来自旧后台");
+        if (snapshot) {
+          this.lastSeq.set(sessionId, snapshot.latestSeq);
+          if (snapshot.serverEpoch) this.epochs.set(sessionId, snapshot.serverEpoch);
+        }
+        this.recoveries.delete(sessionId);
+        this.sendSubscribe(sessionId);
+      } catch {
+        if (!current()) return;
+        recovery.timer = setTimeout(rebuild, Math.min(1000 * 2 ** recovery.attempt++, 15000));
+      }
+    };
+    void rebuild();
+  }
+
   private handleMessage(data: string): void {
     let msg: ServerMessage;
     try {
@@ -163,13 +201,7 @@ export class WsClient {
         // 水位失效：清空后回调全量重建，重建后再订阅会从服务端当前水位开始
         this.lastSeq.delete(msg.sessionId);
         if (msg.serverEpoch) this.epochs.set(msg.sessionId, msg.serverEpoch);
-        Promise.resolve(this.onSnapshotRequired(msg.sessionId)).then((snapshot) => {
-          if (snapshot) {
-            this.lastSeq.set(msg.sessionId, snapshot.latestSeq);
-            if (snapshot.serverEpoch) this.epochs.set(msg.sessionId, snapshot.serverEpoch);
-          }
-          if (this.sessionSinks.has(msg.sessionId)) this.sendSubscribe(msg.sessionId);
-        }).catch(() => { /* REST 错误由查询状态显示；下一次重连重试 */ });
+        this.recoverSnapshot(msg.sessionId, msg.serverEpoch);
         return;
       }
       case "subscribed":
@@ -197,6 +229,7 @@ export class WsClient {
       if (!s) return;
       s.delete(sink);
       if (s.size === 0) {
+        this.cancelRecoveries(sessionId);
         this.sessionSinks.delete(sessionId);
         this.rawSend({ type: "unsubscribe", sessionId });
       }
