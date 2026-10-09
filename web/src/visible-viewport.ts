@@ -12,10 +12,10 @@ function standalone() {
     !!(navigator as Navigator & { standalone?: boolean }).standalone;
 }
 
-/** Installed Chromium apps can expose the actual keyboard bounds, even without a viewport resize. */
+/** Use capability detection: home-screen shortcuts can still report browser display mode. */
 export function configureKeyboardLayout() {
   const keyboard = virtualKeyboard();
-  if (!keyboard || !standalone()) return;
+  if (!keyboard) return;
   try { keyboard.overlaysContent = true; } catch { /* Use the browser's normal resize behavior when unavailable. */ }
 }
 

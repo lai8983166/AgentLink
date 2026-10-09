@@ -6,13 +6,13 @@ test.beforeEach(async ({ page, request }) => {
   await page.addInitScript(() => localStorage.setItem("agentlink-token", "isolated-e2e-token"));
 });
 
-// Model standalone + keyboard overlay signals. This is not an Android WebAPK/OS keyboard test.
-async function installedKeyboard(page: Page) {
-  await page.addInitScript(() => {
+// Model shortcut/standalone + keyboard signals. This is not an Android WebAPK/OS keyboard test.
+async function installedKeyboard(page: Page, standalone = true) {
+  await page.addInitScript((standalone) => {
     const originalMatch = window.matchMedia.bind(window);
     window.matchMedia = (query) => {
       const result = originalMatch(query);
-      if (query.includes("display-mode: standalone")) Object.defineProperty(result, "matches", { value: true });
+      if (query.includes("display-mode: standalone")) Object.defineProperty(result, "matches", { value: standalone });
       return result;
     };
     const viewport = Object.assign(new EventTarget(), { height: innerHeight, offsetTop: 0, scale: 0.9 });
@@ -22,7 +22,8 @@ async function installedKeyboard(page: Page) {
     Object.defineProperty(navigator, "virtualKeyboard", { configurable: true, value: keyboard });
     window.addEventListener("test:keyboard", (event) => {
       const { top, silent, noGeometry } = (event as CustomEvent).detail;
-      keyboard.boundingRect = top && !noGeometry ? new DOMRect(0, top, innerWidth, innerHeight - top) : new DOMRect();
+      // This browser reports bounds only after the app opts into overlaysContent.
+      keyboard.boundingRect = top && keyboard.overlaysContent && !noGeometry ? new DOMRect(0, top, innerWidth, innerHeight - top) : new DOMRect();
       let overlay = document.querySelector<HTMLDivElement>("#test-keyboard");
       if (!overlay) {
         overlay = document.createElement("div"); overlay.id = "test-keyboard";
@@ -39,7 +40,7 @@ async function installedKeyboard(page: Page) {
       viewport.height = (event as CustomEvent).detail;
       // Deliberately omit resize; some installed browsers expose changed sizes without firing it.
     });
-  });
+  }, standalone);
 }
 async function keyboardTop(page: Page, top: number, silent = false) {
   await page.evaluate(({ top, silent }) => window.dispatchEvent(new CustomEvent("test:keyboard", { detail: { top, silent } })), { top, silent });
@@ -57,6 +58,31 @@ async function aboveKeyboard(page: Page, top: number) {
   const button = (await page.getByRole("button", { name: "↑" }).boundingBox())!;
   expect(button.y + button.height).toBeLessThanOrEqual(top);
 }
+
+test("小米桌面入口报告 browser 模式时仍启用键盘 API，输入框紧跟遮挡边界并在关闭后恢复", async ({ page }) => {
+  await installedKeyboard(page, false); await page.goto("/old1");
+  await page.getByRole("button", { name: "接管此会话" }).click();
+  const input = page.getByRole("textbox", { name: "消息指令" }); await input.fill("桌面快捷入口草稿");
+  const initialHeight = await page.evaluate(() => innerHeight);
+  expect(await page.evaluate(() => matchMedia("(display-mode: standalone)").matches)).toBe(false);
+  expect(await page.evaluate(() => (navigator as unknown as { virtualKeyboard: { overlaysContent: boolean } }).virtualKeyboard.overlaysContent)).toBe(true);
+  await keyboardTop(page, 420); await aboveKeyboard(page, 420);
+  expect(await page.evaluate(() => visualViewport!.height)).toBe(initialHeight);
+  await expect.poll(() => page.locator(".session-page").evaluate((element) => element.getBoundingClientRect().bottom)).toBe(420);
+  await expect(input).toBeFocused(); await expect(input).toHaveValue("桌面快捷入口草稿");
+  // Wait for the sample after React commits the new layout, before blurring stops input sampling.
+  await expect.poll(() => page.evaluate(() => {
+    const samples = JSON.parse(sessionStorage.getItem("agentlink-keyboard-layout") ?? "[]");
+    return samples.at(-1)?.fieldBottom;
+  })).toBeLessThanOrEqual(420);
+  await input.blur(); await keyboardTop(page, 0);
+  await expect.poll(() => page.locator(".session-page").evaluate((element) => element.getBoundingClientRect().height)).toBe(initialHeight);
+  await page.goto("/settings"); await page.getByText("输入框仍被键盘遮挡？", { exact: true }).click();
+  await page.getByRole("button", { name: "复制布局诊断" }).click();
+  const diagnostic = JSON.parse(await page.getByRole("textbox", { name: "布局诊断信息" }).inputValue());
+  expect(diagnostic.standalone).toBe(false); expect(diagnostic.keyboardOverlay).toBe(true);
+  expect(diagnostic.samples.some((sample: { keyboardTop: number; fieldBottom: number }) => sample.keyboardTop === 420 && sample.fieldBottom <= 420)).toBe(true);
+});
 
 test("安装模式键盘覆盖但可见区域不缩小：输入及发送按钮可见、可点击且不重复扣高度", async ({ page }, testInfo) => {
   await installedKeyboard(page); await page.goto("/old1");
