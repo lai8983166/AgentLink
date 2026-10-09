@@ -31,6 +31,7 @@ export class DesktopSessionManager {
   private statusTimes = new Map<string, number>();
   private summarySync: Promise<void> | null = null;
   private desiredModes = new Map<string, FollowerMode>();
+  private localSessions = new Set<string>();
   /** 消息幂等：conversationId → 最近的 {id, text, at} */
 
   /** registry 注入：桌面会话摘要变化时重发合并后的列表事件 */
@@ -96,11 +97,13 @@ export class DesktopSessionManager {
 
   /** 观察桌面持有的会话（任务 3.1/5.1 的后端） */
   async observe(conversationId: string, mode: FollowerMode = "observe"): Promise<void> {
+    if (this.localSessions.has(conversationId)) return;
     if (this.desiredModes.get(conversationId) === "takeover") mode = "takeover";
     const existing = this.sessions.get(conversationId);
     if (existing) {
       await existing.start();
       await existing.discover();
+      if (this.localSessions.has(conversationId)) return;
       if (mode === "takeover") existing.mode = "takeover";
       this.remember(existing);
       return;
@@ -108,8 +111,9 @@ export class DesktopSessionManager {
     const client = this.ensureClient();
     const follower = new IpcFollowerSession(client, conversationId, { log: this.log });
     follower.mode = mode;
-    follower.onFacts = (facts) => this.applyFacts(conversationId, facts);
+    follower.onFacts = (facts) => { if (!this.localSessions.has(conversationId)) this.applyFacts(conversationId, facts); };
     follower.onOwnerLost = () => {
+      if (this.localSessions.has(conversationId)) return;
       this.approvals.expireSession(conversationId);
       this.bus.publish(conversationId, {
         type: "session.status",
@@ -121,6 +125,7 @@ export class DesktopSessionManager {
     this.sessions.set(conversationId, follower);
     try {
       await follower.start();
+      if (this.localSessions.has(conversationId)) { follower.stop(); return; }
     } catch (e) {
       follower.stop();
       this.sessions.delete(conversationId);
@@ -131,6 +136,7 @@ export class DesktopSessionManager {
   }
 
   private remember(follower: IpcFollowerSession): void {
+    if (this.localSessions.has(follower.conversationId)) return;
     if (follower.mode === "takeover") {
       this.desiredModes.set(follower.conversationId, "takeover");
       this.opts.controls?.setControl(follower.conversationId, "takeover");
@@ -179,6 +185,7 @@ export class DesktopSessionManager {
     const worker = async () => {
       while (cursor < ids.length && Date.now() < deadline && this.clientReady) {
         const id = ids[cursor++]!;
+        if (this.localSessions.has(id)) continue;
         const existing = this.sessions.get(id);
         if (existing && this.isFresh(existing) && !this.unavailable.has(id)) continue;
         try {
@@ -202,6 +209,7 @@ export class DesktopSessionManager {
   }
 
   private markUnavailable(id: string): void {
+    if (this.localSessions.has(id)) return;
     if (!this.unavailable.has(id)) this.unavailable.set(id, Date.now());
     this.onSummaryChange(id);
   }
@@ -257,6 +265,12 @@ export class DesktopSessionManager {
       });
     }
     return out;
+  }
+
+  /** 成功恢复原 ID 后只释放旧订阅，不发送 interrupt。阻止在途列表请求重新订阅。 */
+  useLocal(conversationId: string): void {
+    this.localSessions.add(conversationId);
+    this.stop(conversationId);
   }
 
   stop(conversationId: string): void {

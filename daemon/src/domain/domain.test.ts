@@ -20,14 +20,14 @@ beforeEach(() => {
 /* ============ 4.1/4.2 状态机 ============ */
 
 describe("SessionRegistry 状态机", () => {
-  async function setup() {
+  async function setup(assertNoWriter?: (id: string) => Promise<void>) {
     const fake = new FakeCodexServer();
     const bridge = new CodexBridge(fake);
     const bus = new SessionEventBus();
     const audit = new AuditStore(join(tmpRoot, "audit.db"));
     const approvals = new ApprovalService(bridge, bus, audit);
     const fs = new FsService([tmpRoot]);
-    const reg = new SessionRegistry(bridge, bus, approvals, fs);
+    const reg = new SessionRegistry(bridge, bus, approvals, fs, undefined, assertNoWriter, async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }));
     await bridge.start();
     await reg.start();
     const events: SessionEvent[] = [];
@@ -129,8 +129,8 @@ describe("SessionRegistry 状态机", () => {
     }
   });
 
-  test("resume：桌面原会话即使 owner 不可达也不抢写权；普通会话仍可恢复", async () => {
-    const { reg, fake } = await setup();
+  test("resume：owner 存在或检测失败都不恢复；普通会话无人持有可恢复", async () => {
+    const { reg, fake } = await setup(async () => { throw new DaemonError("SESSION_BUSY", "writer held"); });
     let ownerAlive: boolean | Error = true;
     reg.setDesktopManager({
       observe: async () => {},
@@ -147,10 +147,12 @@ describe("SessionRegistry 状态机", () => {
       },
       onSummaryChange: () => {},
     });
-    for (const state of [true, false, new Error("IPC_UNAVAILABLE")]) {
+    for (const state of [true, false]) {
       ownerAlive = state;
       await expect(reg.resume("old1")).rejects.toMatchObject({ code: "SESSION_BUSY" });
     }
+    ownerAlive = new Error("IPC_UNAVAILABLE");
+    await expect(reg.resume("old1")).rejects.toThrow("IPC_UNAVAILABLE");
     expect(fake.written.map((s) => JSON.parse(s).method)).not.toContain("thread/resume");
     // 未知来源的会话也必须先确认 owner；检测失败不能当作无人持有。
     await expect(reg.resume("ordinary")).rejects.toThrow("IPC_UNAVAILABLE");
@@ -161,6 +163,63 @@ describe("SessionRegistry 状态机", () => {
     const detail = await reg.resume("ordinary");
     expect(detail.id).toBe("ordinary");
     expect(fake.written.map((s) => JSON.parse(s).method)).toContain("thread/resume");
+  });
+
+  function desktop(ownerAlive?: () => Promise<boolean>) {
+    return { observe: async () => {}, takeover: async () => {}, has: () => false, isTakenOver: () => false,
+      overlay: () => new Map(), sendTurn: async () => {}, interrupt: async () => {}, historyFor: () => null,
+      ownerAlive, onSummaryChange: () => {} };
+  }
+
+  test("无人持有原会话：并发恢复一次，保留 ID、历史和 Full Access，刷新不重置任务", async () => {
+    const checks: string[] = [];
+    const { reg, fake, bus } = await setup(async (id) => { checks.push(id); });
+    reg.setDesktopManager(desktop(async () => false));
+    const [a, b] = await Promise.all([reg.resume("old1"), reg.resume("old1")]);
+    expect(a).toEqual(b);
+    expect(a).toMatchObject({ id: "old1", controlMode: "local", desktopManaged: false, activeElsewhere: false, desktopGone: false, approvalPolicy: "never", forkedFromId: null });
+    expect(a.history.map((h) => h.id)).toEqual(["u1", "a1", "e1"]);
+    expect(checks).toEqual(["old1"]);
+    expect(fake.written.map((line) => JSON.parse(line)).filter((m) => m.method === "thread/resume")).toEqual([
+      expect.objectContaining({ params: { threadId: "old1", approvalPolicy: "never", sandbox: "danger-full-access" } }),
+    ]);
+    fake.notify("thread/status/changed", { threadId: "old1", status: { type: "active", activeFlags: [] } });
+    await reg.observe("old1"); await reg.takeover("old1");
+    expect((await reg.resume("old1")).status).toBe("running");
+    await reg.sendMessage("old1", "继续原任务", "local-new-message");
+    const messages = fake.written.map((line) => JSON.parse(line));
+    expect(messages.find((m) => m.method === "turn/start").params).toMatchObject({ threadId: "old1", approvalPolicy: "never" });
+    expect(messages.filter((m) => m.method === "thread/resume")).toHaveLength(1);
+    expect(messages.some((m) => m.method === "thread/fork")).toBe(false);
+    expect(bus.latestSeq("old1")).toBeGreaterThan(0);
+    expect((await reg.list()).find((s) => s.id === "old1")?.desktopManaged).toBe(false);
+  });
+
+  test("原会话：没有 owner 探测或写锁核验失败，不以失联作为释放证据", async () => {
+    const { reg, fake } = await setup(async () => { throw new DaemonError("IPC_UNAVAILABLE", "writer probe failed"); });
+    await expect(reg.resume("old1")).rejects.toMatchObject({ code: "IPC_UNAVAILABLE" });
+    reg.setDesktopManager(desktop());
+    await expect(reg.resume("old1")).rejects.toMatchObject({ code: "IPC_UNAVAILABLE" });
+    reg.setDesktopManager(desktop(async () => false));
+    await expect(reg.resume("old1")).rejects.toMatchObject({ code: "IPC_UNAVAILABLE" });
+    expect(fake.written.map((line) => JSON.parse(line).method)).not.toContain("thread/resume");
+    expect((await reg.detail("old1")).session.controlMode).toBe("observe");
+  });
+
+  test("核验期间电脑重新打开，或恢复时出现写者冲突，都不解禁也不 fork", async () => {
+    const { reg, fake } = await setup(async () => {});
+    let discoveries = 0;
+    reg.setDesktopManager(desktop(async () => ++discoveries > 1));
+    await expect(reg.resume("old1")).rejects.toMatchObject({ code: "SESSION_BUSY" });
+    expect(fake.written.map((line) => JSON.parse(line).method)).not.toContain("thread/resume");
+    reg.setDesktopManager(desktop(async () => false));
+    fake.resumeError = "thread already has an active writer";
+    await expect(reg.resume("old1")).rejects.toMatchObject({ code: "SESSION_BUSY" });
+    expect((await reg.detail("old1")).session.controlMode).toBe("observe");
+    await expect(reg.sendMessage("old1", "不能发送")).rejects.toMatchObject({ code: "SESSION_NOT_FOUND" });
+    expect(fake.written.map((line) => JSON.parse(line).method)).not.toContain("thread/fork");
+    fake.resumeError = null;
+    expect((await reg.resume("old1")).controlMode).toBe("local");
   });
 
   test("create：白名单外路径拒绝", async () => {
