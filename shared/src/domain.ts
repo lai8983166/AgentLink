@@ -92,6 +92,17 @@ export const SessionSummary = z.object({
 });
 export type SessionSummary = z.infer<typeof SessionSummary>;
 
+/** 当前仍待处理的审批；详情快照用于重开页面与断线后的恢复。 */
+export const PendingApprovalSnapshot = z.object({
+  approvalId: z.string(),
+  kind: ApprovalKind,
+  command: z.string().nullable(),
+  cwd: z.string(),
+  reason: z.string().nullable(),
+  availableDecisions: z.array(z.union([z.string(), z.record(z.unknown())])),
+});
+export type PendingApprovalSnapshot = z.infer<typeof PendingApprovalSnapshot>;
+
 /** 历史条目（会话详情快照） */
 export const HistoryItem = z.discriminatedUnion("type", [
   z.object({
@@ -132,6 +143,8 @@ export type HistoryItem = z.infer<typeof HistoryItem>;
 
 /** 会话详情 = 摘要 + 历史 */
 export const SessionDetail = SessionSummary.extend({
+  approvals: z.array(PendingApprovalSnapshot).optional(),
+  controlMode: z.enum(["local", "observe", "takeover"]).optional(),
   history: z.array(HistoryItem),
   tokenUsage: TokenUsage.nullable(),
 });

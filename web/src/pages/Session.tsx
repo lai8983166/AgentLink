@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SessionEvent } from "@agentlink/shared";
+import type { SessionDetailResponse, SessionEvent } from "@agentlink/shared";
 import { api, ws } from "../runtime";
-import { applyEventToHistory, followState } from "../store";
+import { followState } from "../store";
 import { ApprovalCard, type PendingApprovalUI } from "../components/ApprovalCard";
 import { ToolCard } from "../components/ToolCard";
 import { MarkdownLite } from "../components/Markdown";
 import { DesktopBanner } from "../components/DesktopBanner";
+import { applySessionEvent, mergeSessionDetail } from "../session-state";
 
 const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -20,6 +21,11 @@ const STATUS_LABEL: Record<string, string> = {
 
 /** 会话页（任务 7.4/7.5）：动作条常显 + 流式 + 工具卡片 + 审批 + 排队 + 滚动跟随 */
 export function Session() {
+  const { sessionId } = useParams();
+  return <SessionView key={sessionId} />;
+}
+
+function SessionView() {
   const { sessionId = "" } = useParams();
   const [search, setSearch] = useSearchParams();
   const navigate = useNavigate();
@@ -32,13 +38,31 @@ export function Session() {
   const [approvals, setApprovals] = useState(new Map<string, { req: PendingApprovalUI; resolved: { decision: string } | null }>());
   const [liveStatus, setLiveStatus] = useState<{ status: string; activity: string | null } | null>(null);
   const [takenOverId, setTakenOverId] = useState<string | null>(null);
-  const takenOver = takenOverId === sessionId;
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  const eventBacklog = useRef<SessionEvent[]>([]);
 
   const detailQ = useQuery({
     queryKey: ["session", sessionId],
-    queryFn: () => api.sessionDetail(sessionId),
+    queryFn: async () => {
+      const incoming = await api.sessionDetail(sessionId);
+      let result = mergeSessionDetail(queryClient.getQueryData<SessionDetailResponse>(["session", sessionId]), incoming);
+      for (const e of eventBacklog.current) result = applySessionEvent(result, e) ?? result;
+      return result;
+    },
+    refetchOnMount: "always",
   });
+  const takenOver = detailQ.data?.session.controlMode === "takeover" ||
+    (detailQ.data?.session.controlMode === undefined && takenOverId === sessionId);
+
+  useEffect(() => {
+    const snapshot = detailQ.data?.session.approvals;
+    if (!snapshot) return;
+    setApprovals((previous) => {
+      const next = new Map([...previous].filter(([id, a]) => a.resolved || snapshot.some((p) => p.approvalId === id)));
+      for (const req of snapshot) next.set(req.approvalId, { req, resolved: null });
+      return next;
+    });
+  }, [detailQ.data?.session.approvals]);
 
   // 桌面原会话只走 observe；占用标记变化/失联时也不能自动 resume 抢写权。
   // 摘要来源：优先列表缓存（首页已拉过，快）——detail 走 rollout 首拉可达 30s，
@@ -87,12 +111,16 @@ export function Session() {
   }, [sessionId, queryClient]);
 
   function applyEvent(e: SessionEvent) {
+    const cached = queryClient.getQueryData<SessionDetailResponse>(["session", sessionId]);
+    if (cached && e.seq <= cached.latestSeq) return;
+    if (!cached) eventBacklog.current = [...eventBacklog.current, e].slice(-500);
+    queryClient.setQueryData<SessionDetailResponse>(["session", sessionId], (old) => applySessionEvent(old, e));
     if (e.type === "session.status") {
       setLiveStatus({ status: e.status, activity: e.activity });
       queryClient.setQueryData(["sessions"], (old: { sessions: Array<{ id: string; status: string }> } | undefined) => {
         if (!old) return old;
         return {
-          sessions: old.sessions.map((s) => (s.id === sessionId ? { ...s, status: e.status } : s)),
+          sessions: old.sessions.map((s) => (s.id === sessionId ? { ...s, status: e.status, statusUpdatedAt: e.at } : s)),
         };
       });
       return;
@@ -152,21 +180,15 @@ export function Session() {
     if (e.type === "agent.message") {
       setDelta(null);
     }
-    if (e.type === "user.message" || e.type === "agent.message" || e.type === "tool.started" || e.type === "tool.finished") {
-      queryClient.setQueryData(["session", sessionId], (old: { session: { history: never[] } } | undefined) => {
-        if (!old) return old;
-        return { session: { ...old.session, history: applyEventToHistory(old.session.history, e) } };
-      });
-    }
   }
 
   const [delta, setDelta] = useState<{ itemId: string; text: string } | null>(null);
 
   const session = detailQ.data?.session;
-  const status = liveStatus?.status ?? session?.status ?? "idle";
+  const status = session?.status ?? liveStatus?.status ?? "unknown";
   const activity = liveStatus?.activity ?? null;
   const isDesktopBusy = !!session?.desktopManaged || (!!session?.activeElsewhere && !session?.desktopGone);
-  const canDrive = !isDesktopBusy || takenOver;
+  const canDrive = !isDesktopBusy || (takenOver && !session?.desktopGone && status !== "unknown");
 
   // 滚动跟随
   useEffect(() => {
@@ -257,7 +279,13 @@ export function Session() {
         takenOver={takenOver}
         forkedFromId={session?.forkedFromId ?? null}
         forkedToId={session?.forkedToId ?? null}
-        onTakenOver={() => setTakenOverId(sessionId)}
+        onTakenOver={() => {
+          setTakenOverId(sessionId);
+          queryClient.setQueryData<SessionDetailResponse>(["session", sessionId], (old) => old && ({
+            ...old, session: { ...old.session, controlMode: "takeover" },
+          }));
+          queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
+        }}
         onForked={(newId) => {
           queryClient.invalidateQueries({ queryKey: ["sessions"] });
           navigate(`/${newId}`);
