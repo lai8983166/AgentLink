@@ -1,12 +1,24 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
+const appBuild = new Date().toISOString();
+const buildMetadata: Plugin = {
+  name: "agentlink-build-version",
+  generateBundle() {
+    this.emitFile({ type: "asset", fileName: "version.json", source: JSON.stringify({ build: appBuild }) });
+  },
+};
+
 export default defineConfig({
+  define: { __APP_BUILD__: JSON.stringify(appBuild) },
   plugins: [
     react(),
+    buildMetadata,
     VitePWA({
+      // Activate new caches for legacy installations; our own updater controls page reload.
       registerType: "autoUpdate",
+      injectRegister: false,
       includeAssets: ["icons/icon.svg"],
       manifest: {
         name: "AgentLink",
@@ -23,6 +35,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        clientsClaim: true,
+        skipWaiting: true,
+        globIgnores: ["**/version.json"],
         // 静态资源预缓存；API/WS 永不缓存
         navigateFallback: "/index.html",
         runtimeCaching: [],
