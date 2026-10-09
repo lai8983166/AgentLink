@@ -8,10 +8,15 @@ class FakePipe implements PipeLikeSocket {
   private dataCb: ((d: Buffer) => void) | null = null;
   private connectCb: (() => void) | null = null;
   destroyed = false;
+  closeCb: (() => void) | null = null;
+  errorCb: (() => void) | null = null;
+  failInitialize = false;
 
   on(event: string, cb: (...a: never[]) => void): unknown {
     if (event === "data") this.dataCb = cb as (d: Buffer) => void;
     if (event === "connect") this.connectCb = cb as () => void;
+    if (event === "close") this.closeCb = cb as () => void;
+    if (event === "error") this.errorCb = cb as () => void;
     return this;
   }
   write(data: Buffer): boolean {
@@ -30,7 +35,8 @@ class FakePipe implements PipeLikeSocket {
     const msg = JSON.parse(data.subarray(4, 4 + len).toString("utf-8"));
     if (msg.type === "request") {
       if (msg.method === "initialize") {
-        this.serverSend({ type: "response", requestId: msg.requestId, result: { clientId: "desktop-1", codexCli: "0.160.0" } });
+        this.serverSend(this.failInitialize ? { type: "response", requestId: msg.requestId, error: { message: "handshake rejected" } }
+          : { type: "response", requestId: msg.requestId, result: { clientId: "desktop-1", codexCli: "0.160.0" } });
       } else if (msg.method === "thread-owner-discovery") {
         this.serverSend({
           type: "response",
@@ -87,6 +93,49 @@ function setup() {
 }
 
 describe("IpcClient（任务 1.1/1.2）", () => {
+  test("旧管道迟到关闭不影响新连接；断线清除残留半帧", async () => {
+    const { client, pipes } = setup();
+    await new Promise((r) => setTimeout(r, 10));
+    const old = pipes[0]!;
+    (client as unknown as { buf: Buffer }).buf = Buffer.from([100, 0, 0]);
+    old.closeCb?.();
+    await new Promise((r) => setTimeout(r, 550));
+    pipes[1]!.fireConnect();
+    await new Promise((r) => setTimeout(r, 10));
+    old.closeCb?.();
+    old.errorCb?.();
+    expect(client.state).toBe("open");
+    expect((await client.callFull("thread-owner-discovery", {})).resultType).toBe("success");
+    client.disconnect();
+  });
+
+  test("握手失败不能虚报已连接；主动断开取消自动重连", async () => {
+    const pipes: FakePipe[] = [];
+    const client = new IpcClient(() => { const p = new FakePipe(); p.failInitialize = true; pipes.push(p); return p; });
+    let connected = 0;
+    client.onConnected = () => { connected++; };
+    client.connect();
+    pipes[0]!.fireConnect();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(client.state).toBe("closed");
+    expect(connected).toBe(0);
+    client.disconnect();
+    await new Promise((r) => setTimeout(r, 550));
+    expect(pipes).toHaveLength(1);
+    await expect(client.callFull("thread-owner-discovery", {})).rejects.toThrow("未就绪");
+  });
+
+  test("握手前的业务请求等待就绪，不能使用初始化客户端 ID 发出", async () => {
+    const pipe = new FakePipe();
+    const client = new IpcClient(() => pipe);
+    client.connect();
+    const request = client.callFull("thread-owner-discovery", {});
+    expect(pipe.written).toHaveLength(0);
+    pipe.fireConnect();
+    expect((await request).resultType).toBe("success");
+    expect(lastFrame(pipe).sourceClientId).toBe("desktop-1");
+    client.disconnect();
+  });
   test("握手取得 clientId 并记录对端信息", async () => {
     const { client } = setup();
     await new Promise((r) => setTimeout(r, 10));
