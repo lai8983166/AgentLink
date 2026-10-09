@@ -45,7 +45,7 @@ export class SessionRegistry {
     takeover(id: string): Promise<void>;
     has(id: string): boolean;
     isTakenOver(id: string): boolean;
-    overlay(): Map<string, { status: SessionStatus | null; mode: string; desktopGone: boolean }>;
+    overlay(): Map<string, { status: SessionStatus | null; mode: string; desktopGone: boolean; pendingApprovals?: number }>;
     sendTurn(id: string, text: string): Promise<void>;
     interrupt(id: string): Promise<void>;
     /** 观察中会话的快照历史（完整直出，避免 diff 事件重复/截断） */
@@ -83,6 +83,7 @@ export class SessionRegistry {
       ...base,
       desktopManaged: true,
       status: ov.status ?? base.status,
+      pendingApprovals: ov.pendingApprovals ?? base.pendingApprovals,
       activeElsewhere: takenOver ? false : base.activeElsewhere,
       desktopGone: ov.desktopGone,
     };

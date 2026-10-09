@@ -3,6 +3,7 @@ import type { IpcClient } from "./client";
 import { BROADCAST_FOLLOWING, IpcMethod, type ConversationState } from "./protocol";
 import {
   diffDesktopState,
+  desktopStatusFact,
   normalizeSnapshot,
   revisionOk,
   type DesktopFact,
@@ -152,8 +153,9 @@ export class IpcFollowerSession {
         this.takeBaseline(next);
         return;
       }
-      this.emitFacts(diffDesktopState(this.lastState, next));
+      const facts = diffDesktopState(this.lastState, next);
       this.lastState = next;
+      this.emitFacts(facts);
       return;
     }
     // 非 snapshot 增量：能拿到完整 conversationState 就走差分，否则重订阅换快照
@@ -170,8 +172,9 @@ export class IpcFollowerSession {
         this.takeBaseline(next);
         return;
       }
-      this.emitFacts(diffDesktopState(this.lastState, next));
+      const facts = diffDesktopState(this.lastState, next);
       this.lastState = next;
+      this.emitFacts(facts);
       return;
     }
     // 无法解析的增量：重订阅换取权威快照
@@ -183,14 +186,11 @@ export class IpcFollowerSession {
   private takeBaseline(next: DesktopState): void {
     this.suppressNextDiff = false;
     this.lastState = next;
-    const status = next.requests.length > 0 ? "waiting_approval" : "idle";
     this.onFacts([
       { kind: "history.sync" },
-      {
-        kind: "session.status",
-        status: status as "waiting_approval" | "idle",
-        activity: next.requests[0]?.command ?? null,
-      },
+      // 首帧也同步当前审批，但不重放完整消息/工具历史。
+      ...diffDesktopState(null, next).filter((f) => f.kind === "approval.request"),
+      desktopStatusFact(next),
     ]);
   }
 

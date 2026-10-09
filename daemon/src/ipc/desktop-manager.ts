@@ -4,6 +4,7 @@ import { IpcMethod } from "./protocol";
 import { recentLimits } from "./rollout-limits";
 import { IpcFollowerSession, type FollowerMode } from "./follower";
 import type { DesktopFact } from "./mapper";
+import { desktopStatusFact } from "./mapper";
 import type { SessionEventBus } from "../events/bus";
 import type { ApprovalService } from "../domain/approvals";
 import { savePeerInfo } from "./peer-info";
@@ -17,6 +18,7 @@ export interface DesktopOverlayEntry {
   status: SessionStatus | null;
   mode: FollowerMode;
   desktopGone: boolean;
+  pendingApprovals?: number;
 }
 
 export class DesktopSessionManager {
@@ -165,7 +167,12 @@ export class DesktopSessionManager {
   overlay(): Map<string, DesktopOverlayEntry> {
     const out = new Map<string, DesktopOverlayEntry>();
     for (const [id, f] of this.sessions) {
-      out.set(id, { status: null, mode: f.mode, desktopGone: f.ownerLost });
+      out.set(id, {
+        status: f.lastState ? desktopStatusFact(f.lastState).status : null,
+        mode: f.mode,
+        desktopGone: f.ownerLost,
+        pendingApprovals: f.lastState?.requests.length ?? 0,
+      });
     }
     return out;
   }

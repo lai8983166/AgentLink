@@ -237,17 +237,18 @@ function normalizeItem(turnId: string, idx: number, item: IpcTurnItem): DesktopT
 }
 
 function normalizeRequest(r: IpcPendingRequest): DesktopRequestState | null {
-  const id = str(r.id);
+  const id = typeof r.id === "number" ? String(r.id) : str(r.id);
   if (!id) return null;
+  const params = r.params && typeof r.params === "object" ? r.params as Record<string, unknown> : r;
   const raw = JSON.stringify(r);
   const isFile = /file|patch/i.test(str(r.kind) ?? "") || /fileChange/i.test(raw);
   return {
     id,
     kind: isFile ? "fileChange" : "command",
-    command: str(r.command) ?? null,
-    cwd: str(r.cwd) ?? "",
-    reason: str(r.reason),
-    availableDecisions: Array.isArray(r.availableDecisions) ? r.availableDecisions : [],
+    command: str(params.command) ?? null,
+    cwd: str(params.cwd) ?? "",
+    reason: str(params.reason),
+    availableDecisions: Array.isArray(params.availableDecisions) ? params.availableDecisions : [],
   };
 }
 
@@ -271,9 +272,13 @@ export function normalizeSnapshot(cs: ConversationState): DesktopState {
   };
 }
 
-function turnStatusToFacts(next: DesktopState): DesktopFact {
+export function desktopStatusFact(next: DesktopState): Extract<DesktopFact, { kind: "session.status" }> {
   const hasPending = next.requests.length > 0;
   if (hasPending) return { kind: "session.status", status: "waiting_approval", activity: next.requests[0]?.command ?? "等待批准" };
+  // history 中可能有本地 tail 或插入顺序不同的实体，不能只用最后一个实体判断活动轮次。
+  if (next.turns.some((t) => t.status === "inProgress" || t.status === "running")) {
+    return { kind: "session.status", status: "running", activity: null };
+  }
   const last = next.turns[next.turns.length - 1];
   if (!last) return { kind: "session.status", status: "idle", activity: null };
   if (last.status === "inProgress" || last.status === "running") return { kind: "session.status", status: "running", activity: null };
@@ -370,7 +375,7 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
   }
 
   // 状态（放在末尾，保证 UI 先看到内容再看状态）
-  facts.push(turnStatusToFacts(next));
+  facts.push(desktopStatusFact(next));
   return facts;
 }
 
