@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { configureKeyboardLayout, keyboardDiagnosticReport, useVisibleViewport } from "./visible-viewport";
+import { configureKeyboardLayout, keyboardDiagnosticReport, useKeyboardViewport, useVisibleViewport } from "./visible-viewport";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); sessionStorage.clear(); document.body.innerHTML = ""; });
 
@@ -52,6 +52,63 @@ describe("可见区域跟随", () => {
     expect(removeViewport).toHaveBeenCalledWith("scroll", expect.any(Function));
     expect(removeWindow).toHaveBeenCalledWith("resize", expect.any(Function));
     removeWindow.mockRestore();
+  });
+});
+
+function androidInput(api?: ReturnType<typeof keyboard>) {
+  vi.stubGlobal("navigator", { userAgent: "Android XiaoMi/MiuiBrowser", maxTouchPoints: 1, virtualKeyboard: api });
+  const form = document.createElement("form"); form.className = "composer";
+  const input = document.createElement("input"); form.append(input); document.body.append(form);
+  return input;
+}
+
+describe("没有尺寸反馈的输入回退", () => {
+  test("Android 触摸输入没有任何尺寸反馈时临时移到顶部，失焦保留点击时间后恢复", () => {
+    vi.useFakeTimers();
+    try {
+      viewport(); const api = keyboard(); api.overlaysContent = true; const input = androidInput(api);
+      const { result, unmount } = renderHook(() => useKeyboardViewport(true));
+      act(() => input.focus());
+      act(() => vi.advanceTimersByTime(600)); expect(result.current.inputFallback).toBe(false);
+      act(() => vi.advanceTimersByTime(150)); expect(result.current.inputFallback).toBe(true);
+      expect(api.overlaysContent).toBe(false);
+      expect(result.current.style.height).toBe(800);
+      act(() => input.blur()); expect(result.current.inputFallback).toBe(true);
+      act(() => vi.advanceTimersByTime(450)); expect(result.current.inputFallback).toBe(false);
+      unmount(); expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+  test("原生区域缩小时保留底部输入，延迟的键盘边界到达时退出回退", () => {
+    vi.useFakeTimers();
+    try {
+      const vv = viewport(); const api = keyboard(); const input = androidInput(api);
+      const { result } = renderHook(() => useKeyboardViewport(true));
+      act(() => input.focus());
+      act(() => { vv.height = 420; vi.advanceTimersByTime(900); });
+      expect(result.current.inputFallback).toBe(false); expect(result.current.style.height).toBe(420);
+      act(() => { vv.height = 800; vi.advanceTimersByTime(150); });
+      expect(result.current.inputFallback).toBe(false);
+      act(() => { input.blur(); input.focus(); vi.advanceTimersByTime(900); });
+      expect(result.current.inputFallback).toBe(true);
+      act(() => { api.boundingRect = new DOMRect(0, 440, 390, 360); api.dispatchEvent(new Event("geometrychange")); });
+      expect(result.current.inputFallback).toBe(false); expect(result.current.style.height).toBe(440);
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+  test("桌面输入及没有启用回退的页面不会仅因聚焦移到顶部", () => {
+    vi.useFakeTimers();
+    try {
+      viewport(); const input = androidInput();
+      vi.stubGlobal("navigator", { userAgent: "desktop", maxTouchPoints: 0 });
+      const { result, unmount } = renderHook(() => useKeyboardViewport(true));
+      act(() => input.focus()); act(() => vi.advanceTimersByTime(1500));
+      expect(result.current.inputFallback).toBe(false); unmount();
+      const otherInput = androidInput();
+      const unprotected = renderHook(() => useKeyboardViewport());
+      act(() => otherInput.focus());
+      act(() => vi.advanceTimersByTime(1500));
+      expect(unprotected.result.current.inputFallback).toBe(false); unprotected.unmount();
+    } finally { vi.useRealTimers(); }
   });
 });
 

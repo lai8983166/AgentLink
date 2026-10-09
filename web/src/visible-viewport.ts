@@ -58,6 +58,7 @@ function record(bounds: { height: number; top: number }) {
     visibleHeight: viewport?.height ?? null, visibleTop: viewport?.offsetTop ?? null, scale: viewport?.scale ?? null,
     keyboardTop: keyboard?.top ?? null, keyboardHeight: keyboard?.height ?? null,
     pageTop: bounds.top, pageHeight: bounds.height, fieldTop: field.top, fieldBottom: field.bottom,
+    inputLayout: active.closest(".session-page")?.getAttribute("data-input-layout") ?? null,
   };
   try {
     const previous = JSON.parse(sessionStorage.getItem(diagnosticKey) ?? "[]");
@@ -76,17 +77,56 @@ export function keyboardDiagnosticReport() {
 }
 
 /** Fixed containers must fit the visible area even when the keyboard leaves the layout viewport unchanged. */
-export function useVisibleViewport(): CSSProperties {
+export function useKeyboardViewport(protectComposer = false): { style: CSSProperties; inputFallback: boolean } {
   const baselineScale = useRef(window.visualViewport?.scale ?? 1);
   const [bounds, setBounds] = useState(() => measure(baselineScale.current));
+  const [inputFallback, setInputFallback] = useState(false);
   const lastMeasurement = useRef(bounds);
   useLayoutEffect(() => {
     const viewport = window.visualViewport;
     const keyboard = virtualKeyboard();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let settleUntil = 0;
+    let focusedInput: HTMLElement | null = null;
+    let focusedAt = 0;
+    let focusHeight = lastMeasurement.current.height;
+    let receivedKeyboardFeedback = false;
+    let fallback = false;
+    let holdUntil = 0;
+    let overlayReleased = false;
+    const eligible = protectComposer && /Android/i.test(navigator.userAgent) &&
+      (navigator.maxTouchPoints > 0 || !!window.matchMedia?.("(pointer: coarse)").matches);
     const update = () => {
       const next = measure(baselineScale.current, lastMeasurement.current);
+      const active = document.activeElement;
+      const input = eligible && editable(active) && active.closest(".composer") ? active : null;
+      if (input) {
+        if (input !== focusedInput) {
+          focusedInput = input; focusedAt = Date.now(); focusHeight = lastMeasurement.current.height;
+          receivedKeyboardFeedback = false;
+        }
+        const rect = keyboard?.boundingRect;
+        const hasGeometry = !!rect && positive(rect.height) && positive(rect.width);
+        if (hasGeometry || focusHeight - next.height >= 80) receivedKeyboardFeedback = true;
+        const atBaseline = !viewport || Math.abs(viewport.scale - baselineScale.current) < 0.01;
+        // Focus alone cannot prove that the keyboard is open. On Android touch devices,
+        // use a safe top placement if neither geometry nor a meaningful resize arrives.
+        fallback = atBaseline && !receivedKeyboardFeedback && Date.now() - focusedAt >= 750;
+        if (fallback && keyboard?.overlaysContent && !overlayReleased) {
+          // A present API can still provide no bounds. Give native resizing a chance again.
+          overlayReleased = true;
+          try { keyboard.overlaysContent = false; } catch { /* Top placement remains available. */ }
+        }
+        holdUntil = 0;
+      } else {
+        if (focusedInput) {
+          focusedInput = null;
+          // Keep the send button in place while the focus-out click finishes.
+          holdUntil = fallback ? Date.now() + 400 : 0;
+        }
+        fallback = Date.now() < holdUntil;
+      }
+      setInputFallback((old) => old === fallback ? old : fallback);
       lastMeasurement.current = next;
       setBounds((old) => old.height === next.height && old.top === next.top ? old : next);
       record(next);
@@ -123,6 +163,10 @@ export function useVisibleViewport(): CSSProperties {
       document.removeEventListener("focusout", settle);
       document.removeEventListener("visibilitychange", settle);
     };
-  }, []);
-  return { position: "fixed", left: 0, right: 0, top: bounds.top, height: bounds.height };
+  }, [protectComposer]);
+  return { style: { position: "fixed", left: 0, right: 0, top: bounds.top, height: bounds.height }, inputFallback };
+}
+
+export function useVisibleViewport(): CSSProperties {
+  return useKeyboardViewport().style;
 }

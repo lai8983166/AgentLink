@@ -11,7 +11,7 @@ import { DesktopBanner } from "../components/DesktopBanner";
 import { applySessionEvent, mergeSessionDetail } from "../session-state";
 import { useMessageOutbox } from "../message-outbox";
 import { mergeOutgoingHistory } from "../message-history";
-import { useVisibleViewport } from "../visible-viewport";
+import { useKeyboardViewport } from "../visible-viewport";
 import { UpdateNotice } from "../components/UpdateNotice";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -30,7 +30,7 @@ export function Session() {
 }
 
 function SessionView() {
-  const viewportStyle = useVisibleViewport();
+  const { style: viewportStyle, inputFallback } = useKeyboardViewport(true);
   const { sessionId = "" } = useParams();
   const [search, setSearch] = useSearchParams();
   const navigate = useNavigate();
@@ -235,7 +235,7 @@ function SessionView() {
   const approvalList = [...approvals.entries()];
 
   return (
-    <div className={`session-page${inputAtTop ? " composer-at-top" : ""}`} style={viewportStyle}>
+    <div className={`session-page${inputAtTop || inputFallback ? " composer-at-top" : ""}`} data-input-layout={inputAtTop ? "manual-top" : inputFallback ? "auto-top" : "bottom"} style={viewportStyle}>
       <div className="session-header">
       <div className="topbar">
         <Link to="/" className="back">

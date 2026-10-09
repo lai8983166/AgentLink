@@ -326,6 +326,7 @@ body {
   order: -1;
 }
 .composer-at-top .composer {
+  order: -2;
   padding-top: max(10px, env(safe-area-inset-top));
   padding-bottom: 10px;
   border-top: 0;

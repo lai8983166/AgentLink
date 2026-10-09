@@ -20,6 +20,7 @@ export function KeyboardDiagnostics() {
       <input type="checkbox" checked={inputAtTop} onChange={(event) => setInputAtTop(event.target.checked)} />
       会话输入栏固定在顶部（兼容模式）
     </label>
+    <p style={{ margin: "10px 0", lineHeight: 1.7 }}>无法获得键盘尺寸时，Android 触摸设备会在输入期间自动将会话输入栏移至顶部。也可勾选上方选项，始终使用顶部输入栏。</p>
     <p style={{ margin: "10px 0", lineHeight: 1.7 }}>先在会话里弹出键盘并输入，再回到这里复制布局诊断。</p>
     <button className="btn ghost" onClick={copy}>复制布局诊断</button>
     {notice && <div role="status" style={{ margin: "10px 0" }}>{notice}</div>}
