@@ -14,7 +14,7 @@ GitHub Actions 在 Windows 上对 push 和 pull request 执行相同检查，并
 
 ## 覆盖范围
 
-2026-10-09 本地结果：后端/共享包此前 149 项通过，2 项真实连接测试默认跳过（此前另行连接本机真实桌面运行，两项均通过）；本次键盘兼容修改后前端 88 项通过，浏览器全量 36 项通过，2 项触摸手势用例在桌面项目中明确跳过、在移动项目中通过。前端构建及浏览器 TypeScript 检查通过。此前另行只读观察真实增量，3 条 patches 全部应用、未触发重订阅。本次未修改后端、未重跑后端测试。未测量覆盖率百分比。
+2026-10-09 补齐原会话恢复路径后的本地结果：后端/共享包 158 项通过，2 项真实连接测试默认跳过（此前另行连接本机真实桌面运行，两项均通过）；前端 92 项通过；浏览器全量 40 项通过，2 项触摸手势用例在桌面项目中明确跳过、在移动项目中通过。全部 TypeScript 检查、生产构建通过；最后补充恢复回执与事件竞争的合并后，重建生产包并重跑相关 4 项浏览器测试通过。另用隔离 CODEX_HOME、合成历史和真实 codex app-server 验证原 ID、历史、Full Access，以及 workspace-write 的附加写目录、网络和临时目录规则。没有向用户会话发送指令、审批、恢复或中断。未测量覆盖率百分比。
 
 | 层级 | 重点验证 |
 | --- | --- |
@@ -28,7 +28,24 @@ GitHub Actions 在 Windows 上对 push 和 pull request 执行相同检查，并
 
 `e2e/mobile-usability.spec.ts` 的刷新用例单独拦截列表、连接状态和 WS，以固定空列表、长列表及失败/慢响应；触摸通过 Chromium CDP 的真实输入分发，验证非 passive 监听与滚动协商。键盘用例模拟独立的 VisualViewport 高度和 offsetTop，保留原窗口高度，并另测真实窗口 resize；测试不会弹出实体手机键盘。手机键盘可只缩小可见区域，相关 API 参考 [MDN VisualViewport](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport)。
 
-2026-10-09 已重建前端，并通过只读 HTTP 检查确认运行中的后台提供最新 bundle（首页、JS、版本文件及 Service Worker 均为 200），首页包含新的键盘缩放策略。当前构建号为 `2026-10-09T11:49:44.836Z`，JS 为 `/assets/index-B4Rhl9ar.js`。此次没有重启 daemon 或桌面应用；后台提供新版不能证明实体手机已加载新版。
+2026-10-09 已重建前端并安全重启 AgentLink 后台。只读 HTTP 检查确认运行中的后台提供构建 `2026-10-09T13:00:46.507Z`，JS 为 `/assets/index-YyfoyKEe.js`，包含“继续原会话”入口。后台 PID 从 25228 变为 39124；重启前后核验三条真实会话写入锁仍由原桌面/IDE 进程持有，当前会话与另一活动会话仍为 running。没有重启桌面/IDE 应用。后台提供新版不能证明实体手机已加载新版；从设置页检查更新并明确更新页面。
+
+## 无拥有者时继续原会话
+
+`e2e/resume-original.spec.ts` 在桌面和移动尺寸中验证：打开页面不自动恢复桌面来源的旧会话；用户点击“继续原会话”后保留 ID、历史、never 和 danger-full-access，发送走本地 app-server，刷新不重复恢复或重置任务。仍有桌面 owner、仍有文件写入者、探测异常，以及最终 resume 的写者竞争均保持输入禁用，不自动 fork。截图核对移动布局中的按钮与恢复后的输入框。
+
+后端另外验证两个客户端并发恢复只调用一次 thread/resume、恢复后不重新订阅旧 owner、迟到快照不覆盖本地会话、停止旧订阅不发送 interrupt，以及权限记录半行截断时使用最后完整记录。Windows 写锁测试只使用独立临时文件，实际持有句柄时必须拒绝，旧空闲锁文件不会被删除。
+
+真实执行权限兼容性可独立复查：
+
+```bash
+node design/spike/resume-permissions-probe.mjs <codex.exe绝对路径> explicit
+node design/spike/resume-permissions-probe.mjs <codex.exe绝对路径> workspace
+```
+
+脚本使用临时 CODEX_HOME 和合成历史，不连接桌面 IPC、不启动模型轮次。默认不带参数的对照验证发现：只传 threadId 会保留 never，却可能将 Full Access 重置为只读；因此恢复路径从最后完整 turn_context 读取沙箱并明确传回。workspace 对照目录配置 Windows elevated 沙箱，与本机现有设置一致；不执行工具或安装沙箱组件。无法读取权限、未知沙箱类型及当前接口无法表示的自定义只读网络权限会拒绝恢复。浏览器和隔离引擎验证不能替代实体手机及真正关闭/重开桌面应用的交接验收。
+
+恢复后由后台持有写入权，关闭手机页面不会释放；当前不包含后台向桌面自动交还写入权。后续部署仍必须重新核验实际锁，不能根据空闲状态结束持有者。
 
 ## 安装版 PWA 更新
 
