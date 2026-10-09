@@ -13,6 +13,7 @@ export const ClientMessage = z.discriminatedUnion("type", [
     sessionId: z.string(),
     /** 断线重连时携带最后已收序号，服务端补发其后事件 */
     lastSeq: z.number().int().nonnegative().nullable().optional(),
+    serverEpoch: z.string().optional(),
   }),
   z.object({ type: z.literal("unsubscribe"), sessionId: z.string() }),
   /** 订阅会话列表级事件（首页） */
@@ -30,11 +31,13 @@ export const ServerMessage = z.discriminatedUnion("type", [
     sessionId: z.string(),
     /** 订阅基准：客户端应从此序号之后接收 */
     fromSeq: z.number().int(),
+    serverEpoch: z.string().optional(),
   }),
   /** lastSeq 早于保留窗口：客户端需 REST 全量拉取重建 */
   z.object({
     type: z.literal("snapshot.required"),
     sessionId: z.string(),
+    serverEpoch: z.string().optional(),
   }),
   z.object({ type: z.literal("event"), event: SessionEvent }),
   z.object({ type: z.literal("listEvent"), event: ListEvent }),

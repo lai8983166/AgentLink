@@ -37,6 +37,27 @@ interface LiveSession {
 
 export class SessionRegistry {
   private sending = new Map<string, Promise<MessageReceipt>>();
+  private draining = false;
+  private pendingOperations = 0;
+
+  restartReadiness(): { safe: boolean; activeSessionIds: string[]; pendingMessages: number } {
+    const activeSessionIds = [...this.live].filter(([, s]) => s.summary.status === "running" || s.summary.status === "waiting_approval" || s.summary.status === "unknown").map(([id]) => id);
+    return { safe: activeSessionIds.length === 0 && this.sending.size === 0 && this.pendingOperations === 0, activeSessionIds, pendingMessages: this.sending.size };
+  }
+  prepareRestart(): ReturnType<SessionRegistry["restartReadiness"]> {
+    const readiness = this.restartReadiness();
+    if (readiness.safe) this.draining = true;
+    return readiness;
+  }
+  cancelRestart(): void { this.draining = false; }
+  private ensureAccepting(): void {
+    if (this.draining) throw new DaemonError("DAEMON_DRAINING", "后台正在安全重启，请稍后再发送指令");
+  }
+  private controlOperation<T>(operation: () => Promise<T>): Promise<T> {
+    this.ensureAccepting();
+    this.pendingOperations++;
+    return Promise.resolve().then(operation).finally(() => { this.pendingOperations--; });
+  }
   private live = new Map<string, LiveSession>();
   private rolloutIndex = new Map<string, SessionSummary>();
   private knownCodexThreads = new Set<string>();
@@ -215,13 +236,14 @@ export class SessionRegistry {
 
   /* ============ 详情 ============ */
 
-  async detail(id: string): Promise<{ session: SessionDetail; latestSeq: number }> {
+  async detail(id: string): Promise<{ session: SessionDetail; latestSeq: number; serverEpoch: string }> {
     const live = this.live.get(id);
     if (live) {
       return {
         session: { ...live.summary, history: [...live.history], tokenUsage: live.tokenUsage,
           approvals: this.approvals.snapshot(id), controlMode: "local" },
         latestSeq: this.bus.latestSeq(id),
+        serverEpoch: this.bus.epoch,
       };
     }
     // 观察中的桌面会话：历史由快照直出（完整且与事件流无重复）
@@ -233,6 +255,7 @@ export class SessionRegistry {
           session: { ...base, history: desktopHistory, tokenUsage: null,
             approvals: this.approvals.snapshot(id), controlMode: this.desktop?.isTakenOver(id) ? "takeover" : "observe" },
           latestSeq: this.bus.latestSeq(id),
+          serverEpoch: this.bus.epoch,
         };
       }
     }
@@ -261,7 +284,7 @@ export class SessionRegistry {
         pendingApprovals: 0,
       } satisfies SessionSummary);
     return { session: { ...base, history, tokenUsage: null, approvals: this.approvals.snapshot(id),
-      controlMode: base.desktopManaged ? "observe" : "local" }, latestSeq: this.bus.latestSeq(id) };
+      controlMode: base.desktopManaged ? "observe" : "local" }, latestSeq: this.bus.latestSeq(id), serverEpoch: this.bus.epoch };
   }
 
   private historyFromTurns(turns: { data?: Array<{ items?: Array<Record<string, unknown>> }> } | null): HistoryItem[] {
@@ -278,11 +301,16 @@ export class SessionRegistry {
 
   /* ============ 操作 ============ */
 
-  async create(opts: {
+  create(opts: { projectPath: string; approvalPolicy: ApprovalPolicy; prompt: string }): Promise<string> {
+    return this.controlOperation(() => this.createSession(opts));
+  }
+
+  private async createSession(opts: {
     projectPath: string;
     approvalPolicy: ApprovalPolicy;
     prompt: string;
   }): Promise<string> {
+    this.ensureAccepting();
     const abs = await this.fs.isProjectAllowed(opts.projectPath);
     const id = await this.bridge.threadStart({
       cwd: abs,
@@ -317,7 +345,12 @@ export class SessionRegistry {
     return id;
   }
 
-  async resume(id: string, policy?: ApprovalPolicy): Promise<SessionDetail> {
+  resume(id: string, policy?: ApprovalPolicy): Promise<SessionDetail> {
+    return this.controlOperation(() => this.resumeSession(id, policy));
+  }
+
+  private async resumeSession(id: string, policy?: ApprovalPolicy): Promise<SessionDetail> {
+    this.ensureAccepting();
     const desired = policy ?? this.live.get(id)?.desiredPolicy ?? "on-request";
     // 即使 IPC 暂时找不到 owner，桌面原会话也只能通过 follower 操作。
     // 接管后 activeElsewhere=false、owner 丢失后 desktopGone=true 都不允许回落 resume。
@@ -347,6 +380,7 @@ export class SessionRegistry {
   }
 
   sendMessage(id: string, text: string, clientMessageId: string = crypto.randomUUID()): Promise<MessageReceipt> {
+    this.ensureAccepting();
     const key = `${id}:${clientMessageId}`;
     const previous = this.controls.delivery(id, clientMessageId);
     if (previous && previous.text !== text) throw new DaemonError("VALIDATION_ERROR", "同一消息 ID 不能用于不同内容");
@@ -425,7 +459,12 @@ export class SessionRegistry {
   }
 
   /** 兜底接力（owner 发现失败 / 管道不可用）：fork 出归本方管理的新会话 */
-  async fork(id: string, policy?: ApprovalPolicy): Promise<string> {
+  fork(id: string, policy?: ApprovalPolicy): Promise<string> {
+    return this.controlOperation(() => this.forkSession(id, policy));
+  }
+
+  private async forkSession(id: string, policy?: ApprovalPolicy): Promise<string> {
+    this.ensureAccepting();
     const p = policy ?? this.rolloutIndex.get(id)?.approvalPolicy ?? "on-request";
     const thread = await this.bridge.threadFork(id, p);
     const forkId = thread.id;

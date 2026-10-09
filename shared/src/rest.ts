@@ -56,6 +56,7 @@ export const SessionDetailResponse = z.object({
   session: SessionDetail,
   /** 服务端当前保留的最新事件序号（快照重建基准） */
   latestSeq: z.number().int(),
+  serverEpoch: z.string().optional(),
 });
 export type SessionDetailResponse = z.infer<typeof SessionDetailResponse>;
 

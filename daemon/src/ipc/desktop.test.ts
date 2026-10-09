@@ -12,6 +12,7 @@ import { FsService } from "../domain/fs";
 import { FakeCodexServer } from "../testing/fake-codex";
 import { IpcClient, type PipeLikeSocket } from "./client";
 import { DesktopSessionManager } from "./desktop-manager";
+import { ControlStore } from "../domain/control-store";
 
 /** 管理器测试用假管道：应答 + 可注入状态推送 */
 class FakePipe implements PipeLikeSocket {
@@ -81,7 +82,7 @@ afterEach(() => {
   }
 });
 
-async function setup(opts: { summaryTimeoutMs?: number } = {}) {
+async function setup(opts: { summaryTimeoutMs?: number; controls?: ControlStore } = {}) {
   const fake = new FakeCodexServer();
   const bridge = new CodexBridge(fake);
   const bus = new SessionEventBus();
@@ -130,6 +131,19 @@ async function pushBase(pipe: Awaited<ReturnType<typeof setup>>["pipe"]) {
 }
 
 describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
+  test("后台重新装配从持久记录恢复接管；释放观察只清除控制状态，不中断任务", async () => {
+    const controls = new ControlStore();
+    const first = await setup({ controls });
+    const p = first.registry.takeover("old1"); first.pipe.fireConnect(); await p;
+    expect(controls.controls()).toEqual([{ sessionId: "old1", mode: "takeover" }]);
+    const restored = await setup({ controls });
+    const observing = restored.registry.observe("old1"); restored.pipe.fireConnect(); await observing;
+    expect(restored.manager.isTakenOver("old1")).toBe(true);
+    restored.manager.stop("old1");
+    expect(controls.controls()).toEqual([]);
+    expect(restored.pipe.frames().some((f) => f.method === "thread-follower-interrupt-turn")).toBe(false);
+    first.manager.stop("old1"); controls.close();
+  });
   test("首页已经收到审批后新开详情仍含待审批快照；审批消失后详情也移除", async () => {
     const { registry, manager, pipe } = await setup();
     const observation = registry.observe("old1", "takeover");

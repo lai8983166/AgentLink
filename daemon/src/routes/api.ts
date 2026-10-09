@@ -86,6 +86,12 @@ export function createApiRouter(deps: ApiDeps): Hono {
   );
 
   api.get(API.sessions, async (c) => c.json({ sessions: await deps.registry.list() }));
+  api.get("/api/v1/admin/restart-readiness", (c) => c.json(deps.registry.restartReadiness()));
+  api.post("/api/v1/admin/prepare-restart", (c) => {
+    const readiness = deps.registry.prepareRestart();
+    return c.json(readiness, readiness.safe ? 200 : 409);
+  });
+  api.post("/api/v1/admin/cancel-restart", (c) => { deps.registry.cancelRestart(); return c.json({ ok: true }); });
 
   api.post(API.sessions, async (c) => {
     const body = CreateSessionRequest.safeParse(await c.req.json().catch(() => null));
@@ -95,8 +101,7 @@ export function createApiRouter(deps: ApiDeps): Hono {
   });
 
   api.get("/api/v1/sessions/:id", async (c) => {
-    const { session, latestSeq } = await deps.registry.detail(c.req.param("id"));
-    return c.json({ session, latestSeq });
+    return c.json(await deps.registry.detail(c.req.param("id")));
   });
 
   api.post("/api/v1/sessions/:id/resume", async (c) => {

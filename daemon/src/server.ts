@@ -63,6 +63,7 @@ export function createApp(opts: {
 
   // 桌面 IPC follower（任务 3.1）：观察/接管桌面持有会话
   const desktop = new DesktopSessionManager(bus, approvals, {
+    controls,
     log: (...a: unknown[]) => console.log("[desktop]", ...a),
   });
   desktop.limitsMonitor = limits;

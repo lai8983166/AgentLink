@@ -17,6 +17,7 @@ interface Subscription {
 }
 
 export class SessionEventBus {
+  readonly epoch = crypto.randomUUID();
   private buffers = new Map<string, SessionEvent[]>();
   private listBuffer: ListEvent[] = [];
   private counters = new Map<string, number>();
@@ -30,7 +31,7 @@ export class SessionEventBus {
     ev: DistributiveOmit<SessionEvent, "sessionId" | "seq" | "at">,
   ): SessionEvent {
     const seq = this.nextSeq(sessionId);
-    const full = { ...ev, sessionId, seq, at: Date.now() } as SessionEvent;
+    const full = { ...ev, sessionId, seq, at: Date.now(), serverEpoch: this.epoch } as SessionEvent;
     const buf = this.buffers.get(sessionId) ?? [];
     buf.push(full);
     if (buf.length > BUFFER_CAP) buf.splice(0, buf.length - BUFFER_CAP);
@@ -43,7 +44,7 @@ export class SessionEventBus {
   /** 发布列表级事件 */
   publishList(ev: DistributiveOmit<ListEvent, "sessionId" | "seq" | "at">): ListEvent {
     const seq = this.nextSeq(LIST_SCOPE);
-    const full = { ...ev, sessionId: LIST_SCOPE, seq, at: Date.now() } as ListEvent;
+    const full = { ...ev, sessionId: LIST_SCOPE, seq, at: Date.now(), serverEpoch: this.epoch } as ListEvent;
     this.listBuffer.push(full);
     if (this.listBuffer.length > BUFFER_CAP) this.listBuffer.splice(0, this.listBuffer.length - BUFFER_CAP);
     for (const l of this.listSubs) l(full);
@@ -72,7 +73,7 @@ export class SessionEventBus {
     const buf = this.buffers.get(sessionId) ?? [];
     // 当前缓冲里最早的序号；空缓冲时 counter+1 表示"无可补"
     const earliest = buf.length ? (buf[0]?.seq ?? counter + 1) : counter + 1;
-    if (lastSeq != null && lastSeq < earliest - 1) {
+    if (lastSeq != null && (lastSeq < earliest - 1 || lastSeq > counter)) {
       return { ok: false, reason: "snapshot" };
     }
     this.subs.push({ sessionId, listener });

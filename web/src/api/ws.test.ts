@@ -35,6 +35,20 @@ function setup() {
 }
 
 describe("WsClient（任务 7.2）", () => {
+  test("后台重启后重建快照，再从新序号恢复订阅，事件仍能继续到达", async () => {
+    const { client, sockets } = setup();
+    const seen: unknown[] = [];
+    client.subscribe("s1", (e) => seen.push(e));
+    sockets[0]!.serverSend({ type: "subscribed", sessionId: "s1", fromSeq: 1, serverEpoch: "old" });
+    sockets[0]!.serverSend({ type: "event", event: { sessionId: "s1", seq: 500, serverEpoch: "old", type: "error", message: "old" } });
+    client.onSnapshotRequired = async () => ({ latestSeq: 2, serverEpoch: "new" });
+    sockets[0]!.serverSend({ type: "snapshot.required", sessionId: "s1", serverEpoch: "new" });
+    await Promise.resolve(); await Promise.resolve();
+    expect(sockets[0]!.sent.map((s) => JSON.parse(s))).toContainEqual({ type: "subscribe", sessionId: "s1", lastSeq: 2, serverEpoch: "new" });
+    sockets[0]!.serverSend({ type: "event", event: { sessionId: "s1", seq: 3, serverEpoch: "new", type: "error", message: "new" } });
+    expect(seen).toHaveLength(2);
+    client.disconnect();
+  });
   test("断开后立即重连，旧 socket 的迟到关闭和消息不能破坏新连接", () => {
     const { client, sockets } = setup();
     const seen: unknown[] = [];

@@ -26,12 +26,13 @@ export class WsClient {
   state: WsState = "idle";
   onStateChange: (s: WsState) => void = () => {};
   /** 快照重建回调（越窗时由上层全量拉取） */
-  onSnapshotRequired: (sessionId: string) => void = () => {};
+  onSnapshotRequired: (sessionId: string) => void | Promise<{ latestSeq: number; serverEpoch?: string }> = () => {};
 
   private socket: FakeableSocket | null = null;
   private sessionSinks = new Map<string, Set<SessionSink>>();
   private listSinks = new Set<ListSink>();
   private lastSeq = new Map<string, number>();
+  private epochs = new Map<string, string>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffMs = 1000;
   private shouldConnect = false;
@@ -130,7 +131,8 @@ export class WsClient {
 
   private sendSubscribe(sessionId: string): void {
     const seq = this.lastSeq.get(sessionId);
-    this.rawSend({ type: "subscribe", sessionId, lastSeq: seq ?? null });
+    const serverEpoch = this.epochs.get(sessionId);
+    this.rawSend({ type: "subscribe", sessionId, lastSeq: seq ?? null, ...(serverEpoch ? { serverEpoch } : {}) });
   }
 
   private handleMessage(data: string): void {
@@ -143,6 +145,10 @@ export class WsClient {
     switch (msg.type) {
       case "event": {
         const e = msg.event;
+        const epoch = this.epochs.get(e.sessionId);
+        if (e.serverEpoch && epoch && e.serverEpoch !== epoch) return;
+        if (e.serverEpoch) this.epochs.set(e.sessionId, e.serverEpoch);
+        if (e.seq <= (this.lastSeq.get(e.sessionId) ?? 0)) return;
         // 更新序号水位
         if (e.seq > (this.lastSeq.get(e.sessionId) ?? 0)) this.lastSeq.set(e.sessionId, e.seq);
         const sinks = this.sessionSinks.get(e.sessionId);
@@ -156,9 +162,19 @@ export class WsClient {
       case "snapshot.required": {
         // 水位失效：清空后回调全量重建，重建后再订阅会从服务端当前水位开始
         this.lastSeq.delete(msg.sessionId);
-        this.onSnapshotRequired(msg.sessionId);
+        if (msg.serverEpoch) this.epochs.set(msg.sessionId, msg.serverEpoch);
+        Promise.resolve(this.onSnapshotRequired(msg.sessionId)).then((snapshot) => {
+          if (snapshot) {
+            this.lastSeq.set(msg.sessionId, snapshot.latestSeq);
+            if (snapshot.serverEpoch) this.epochs.set(msg.sessionId, snapshot.serverEpoch);
+          }
+          if (this.sessionSinks.has(msg.sessionId)) this.sendSubscribe(msg.sessionId);
+        }).catch(() => { /* REST 错误由查询状态显示；下一次重连重试 */ });
         return;
       }
+      case "subscribed":
+        if (msg.serverEpoch) this.epochs.set(msg.sessionId, msg.serverEpoch);
+        return;
       case "pong":
         this.lastPongAt = Date.now();
         return;

@@ -8,6 +8,7 @@ import { desktopStatusFact } from "./mapper";
 import type { SessionEventBus } from "../events/bus";
 import type { ApprovalService } from "../domain/approvals";
 import { savePeerInfo } from "./peer-info";
+import type { ControlStore } from "../domain/control-store";
 
 /**
  * 桌面会话管理器（任务 3.1/3.3/4.1/4.2）：
@@ -29,6 +30,7 @@ export class DesktopSessionManager {
   private unavailable = new Map<string, number>();
   private statusTimes = new Map<string, number>();
   private summarySync: Promise<void> | null = null;
+  private desiredModes = new Map<string, FollowerMode>();
   /** 消息幂等：conversationId → 最近的 {id, text, at} */
 
   /** registry 注入：桌面会话摘要变化时重发合并后的列表事件 */
@@ -43,8 +45,11 @@ export class DesktopSessionManager {
       log?: (...a: unknown[]) => void;
       clientFactory?: () => IpcClient;
       summaryTimeoutMs?: number;
+      controls?: ControlStore;
     } = {},
-  ) {}
+  ) {
+    for (const { sessionId, mode } of this.opts.controls?.controls() ?? []) this.desiredModes.set(sessionId, mode);
+  }
 
   private get log(): (...a: unknown[]) => void {
     return this.opts.log ?? console.log;
@@ -89,11 +94,13 @@ export class DesktopSessionManager {
 
   /** 观察桌面持有的会话（任务 3.1/5.1 的后端） */
   async observe(conversationId: string, mode: FollowerMode = "observe"): Promise<void> {
+    if (this.desiredModes.get(conversationId) === "takeover") mode = "takeover";
     const existing = this.sessions.get(conversationId);
     if (existing) {
       await existing.start();
       await existing.discover();
       if (mode === "takeover") existing.mode = "takeover";
+      this.remember(existing);
       return;
     }
     const client = this.ensureClient();
@@ -118,6 +125,14 @@ export class DesktopSessionManager {
       throw e;
     }
     this.startLimitsPolling(conversationId);
+    this.remember(follower);
+  }
+
+  private remember(follower: IpcFollowerSession): void {
+    if (follower.mode === "takeover") {
+      this.desiredModes.set(follower.conversationId, "takeover");
+      this.opts.controls?.setControl(follower.conversationId, "takeover");
+    }
   }
 
   /** 桌面会话的账户限额：IPC 快照不含 rate_limits，从 rollout 文件尾读（60s）。
@@ -239,6 +254,8 @@ export class DesktopSessionManager {
   }
 
   stop(conversationId: string): void {
+    this.desiredModes.delete(conversationId);
+    this.opts.controls?.setControl(conversationId, null);
     this.sessions.get(conversationId)?.stop();
     this.sessions.delete(conversationId);
     this.unavailable.delete(conversationId);
