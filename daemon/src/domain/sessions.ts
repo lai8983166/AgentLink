@@ -215,7 +215,8 @@ export class SessionRegistry {
     const live = this.live.get(id);
     if (live) {
       return {
-        session: { ...live.summary, history: [...live.history], tokenUsage: live.tokenUsage },
+        session: { ...live.summary, history: [...live.history], tokenUsage: live.tokenUsage,
+          approvals: this.approvals.snapshot(id), controlMode: "local" },
         latestSeq: this.bus.latestSeq(id),
       };
     }
@@ -225,7 +226,8 @@ export class SessionRegistry {
       const base = this.mergeDesktopOverlay(id) ?? this.rolloutIndex.get(id);
       if (base) {
         return {
-          session: { ...base, history: desktopHistory, tokenUsage: null },
+          session: { ...base, history: desktopHistory, tokenUsage: null,
+            approvals: this.approvals.snapshot(id), controlMode: this.desktop?.isTakenOver(id) ? "takeover" : "observe" },
           latestSeq: this.bus.latestSeq(id),
         };
       }
@@ -254,7 +256,8 @@ export class SessionRegistry {
         approvalPolicy: "on-request",
         pendingApprovals: 0,
       } satisfies SessionSummary);
-    return { session: { ...base, history, tokenUsage: null }, latestSeq: 0 };
+    return { session: { ...base, history, tokenUsage: null, approvals: this.approvals.snapshot(id),
+      controlMode: base.desktopManaged ? "observe" : "local" }, latestSeq: this.bus.latestSeq(id) };
   }
 
   private historyFromTurns(turns: { data?: Array<{ items?: Array<Record<string, unknown>> }> } | null): HistoryItem[] {

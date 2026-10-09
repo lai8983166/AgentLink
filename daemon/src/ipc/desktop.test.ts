@@ -99,7 +99,7 @@ async function setup(opts: { summaryTimeoutMs?: number } = {}) {
     },
   });
   approvals.desktopDelegate = {
-    decide: (sid, rid, dec) => manager.decide(sid, rid, dec),
+    decide: (sid, rid, dec, kind) => manager.decide(sid, rid, dec, kind),
   };
   registry.setDesktopManager(manager);
   await bridge.start();
@@ -130,6 +130,19 @@ async function pushBase(pipe: Awaited<ReturnType<typeof setup>>["pipe"]) {
 }
 
 describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
+  test("首页已经收到审批后新开详情仍含待审批快照；审批消失后详情也移除", async () => {
+    const { registry, manager, pipe } = await setup();
+    const observation = registry.observe("old1", "takeover");
+    pipe.fireConnect();
+    await observation;
+    pipe.pushState("old1", snap(1, [], [{ id: 2, method: "item/fileChange/requestApproval", params: { cwd: "F:/x" } }]));
+    const detail = await registry.detail("old1");
+    expect(detail.session).toMatchObject({ controlMode: "takeover", approvals: [{ approvalId: "2", kind: "fileChange" }] });
+    expect(detail.latestSeq).toBeGreaterThan(0);
+    pipe.pushState("old1", snap(2, []));
+    expect((await registry.detail("old1")).session.approvals).toEqual([]);
+    manager.stop("old1");
+  });
   test("管道未就绪时列表有整体等待上限，不会把未知状态当作空闲", async () => {
     const { registry, manager } = await setup({ summaryTimeoutMs: 60 });
     const started = Date.now();

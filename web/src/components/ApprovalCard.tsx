@@ -58,6 +58,8 @@ export function ApprovalCard({
     const text =
       resolved.decision === "expired"
         ? "已作废（轮次结束）"
+        : resolved.decision === "resolved_elsewhere"
+          ? "已在电脑端处理或已作废"
         : resolved.decision === "accept"
           ? "✓ 已批准"
           : resolved.decision === "acceptForSession"

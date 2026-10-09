@@ -246,6 +246,13 @@ export class ApprovalService {
     return n;
   }
 
+  snapshot(sessionId: string): import("@agentlink/shared").PendingApprovalSnapshot[] {
+    return [...this.pending.values()].filter((a) => a.sessionId === sessionId && !a.expired).map((a) => ({
+      approvalId: a.approvalId, kind: a.kind, command: a.command, cwd: a.cwd,
+      reason: a.reason, availableDecisions: a.availableDecisions,
+    }));
+  }
+
   /** 该会话第一个挂起审批的命令摘要（动作条展示用） */
   pendingCommandFor(sessionId: string): string | null {
     for (const a of this.pending.values()) {
