@@ -207,6 +207,10 @@ export class DesktopSessionManager {
   has(conversationId: string): boolean {
     return this.sessions.has(conversationId);
   }
+  connectionHealth(): { state: string; lastSyncAt: number | null } {
+    const at = Math.max(0, ...[...this.sessions.values()].map((f) => f.lastStateAt));
+    return { state: this.clientReady ? "ready" : this.client?.state ?? "idle", lastSyncAt: at || null };
+  }
 
   /** 桌面/VS Code 当前是否持有该会话（IPC owner 发现）。
    *  只有明确的 no-client-found 才返回 false；管道异常/超时抛错，禁止抢写权。

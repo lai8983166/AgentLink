@@ -40,6 +40,7 @@ async function setup() {
     bridge,
     webDist,
     auditPath: join(tmpRoot, "audit.db"),
+    desktop: false,
   });
   await registry.start();
   const authed = { Authorization: `Bearer ${TOKEN}` } as Record<string, string>;

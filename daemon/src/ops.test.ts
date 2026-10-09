@@ -69,6 +69,7 @@ describe("token 轮换端点", () => {
       allowedRoots: [tmpHome],
       bridge,
       auditPath: join(tmpHome, "a.db"),
+      desktop: false,
     });
     await registry.start();
 
@@ -100,6 +101,7 @@ describe("token 轮换端点", () => {
       allowedRoots: [tmpHome],
       bridge,
       auditPath: join(tmpHome, "b.db"),
+      desktop: false,
     });
     const res = await app.request("/api/v1/admin/token/rotate", { method: "POST" });
     expect(res.status).toBe(401);

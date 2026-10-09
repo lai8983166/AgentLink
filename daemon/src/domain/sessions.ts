@@ -129,8 +129,9 @@ export class SessionRegistry {
       // codex 重启：实时状态全丢，回读 rollout 重建
       for (const [id, s] of this.live) {
         if (s.summary.status === "running" || s.summary.status === "waiting_approval") {
-          s.summary.status = "idle";
-          this.bus.publish(id, { type: "session.status", status: "idle", activity: null });
+          s.summary.status = "unknown";
+          this.bus.publish(id, { type: "session.status", status: "unknown", activity: null });
+          this.publishUpdated(s);
         }
       }
       this.refreshRollouts().catch(() => {});

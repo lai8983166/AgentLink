@@ -22,6 +22,7 @@ export function connectWs(): () => void {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["sessions"] });
     queryClient.invalidateQueries({ queryKey: ["session"] });
+    queryClient.invalidateQueries({ queryKey: ["status"] });
   };
   ws.onStateChange = (s) => {
     useStore.getState().setWsConnected(s === "open");

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SessionDetailResponse, SessionEvent } from "@agentlink/shared";
 import { api, ws } from "../runtime";
-import { followState } from "../store";
+import { followState, useStore } from "../store";
 import { ApprovalCard, type PendingApprovalUI } from "../components/ApprovalCard";
 import { ToolCard } from "../components/ToolCard";
 import { MarkdownLite } from "../components/Markdown";
@@ -35,6 +35,8 @@ function SessionView() {
   const [follow, setFollow] = useState(true);
   const [queue, setQueue] = useState(0);
   const { input, setInput, sending, notice, uncertain, submit, recheck } = useMessageOutbox(sessionId);
+  const wsConnected = useStore((s) => s.wsConnected);
+  const [interrupting, setInterrupting] = useState(false);
   const [busyError, setBusyError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState(new Map<string, { req: PendingApprovalUI; resolved: { decision: string } | null }>());
   const [liveStatus, setLiveStatus] = useState<{ status: string; activity: string | null } | null>(null);
@@ -240,9 +242,14 @@ function SessionView() {
           <div className="sub">{session?.cwd}</div>
         </div>
         {(status === "running" || status === "waiting_approval") && (
-          <div className="icon-btn" title="中断" onClick={() => api.interrupt(sessionId).catch(() => {})}>
+          <button className="icon-btn" title="中断" disabled={!canDrive || interrupting} onClick={async () => {
+            setInterrupting(true);
+            try { await api.interrupt(sessionId); }
+            catch (e) { setErrorBanner(e instanceof Error ? e.message : "中断失败，请重试"); }
+            finally { setInterrupting(false); }
+          }}>
             ⏹
-          </div>
+          </button>
         )}
       </div>
 
@@ -287,6 +294,11 @@ function SessionView() {
       />
 
       {/* 动作条：当前动作常显 */}
+      <div style={{ padding: "4px 16px", fontSize: 11, color: "var(--text-dim)" }}>
+        {wsConnected ? "手机与后台已连接" : "手机与后台连接中"}
+        {session?.desktopManaged && ` · ${session.desktopGone ? "电脑端未连接" : status === "unknown" ? "会话状态待确认" : takenOver ? "原会话可控制" : "原会话观察中"}`}
+        {session?.statusUpdatedAt ? ` · 同步于 ${new Date(session.statusUpdatedAt).toLocaleTimeString()}` : ""}
+      </div>
       <div
         style={{
           display: "flex",
