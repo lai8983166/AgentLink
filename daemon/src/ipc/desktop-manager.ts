@@ -309,7 +309,8 @@ export class DesktopSessionManager {
     for (const turn of state.turns) {
       for (const item of turn.items) {
         if (item.type === "userMessage") {
-          out.push({ type: "userMessage", id: item.key, text: item.text, at: 0 });
+          out.push({ type: "userMessage", id: item.key, text: item.text, at: 0,
+            ...(item.clientMessageId ? { clientMessageId: item.clientMessageId } : {}) });
         } else if (item.type === "agentMessage") {
           out.push({ type: "agentMessage", id: item.key, text: item.text, at: 0 });
         } else if (item.type === "commandExecution") {
@@ -360,7 +361,8 @@ export class DesktopSessionManager {
           this.onSummaryChange?.(conversationId);
           break;
         case "user.message":
-          this.bus.publish(conversationId, { type: "user.message", itemId: f.itemId, text: f.text });
+          this.bus.publish(conversationId, { type: "user.message", itemId: f.itemId, text: f.text,
+            ...(f.clientMessageId ? { clientMessageId: f.clientMessageId } : {}) });
           break;
         case "agent.message":
           this.bus.publish(conversationId, { type: "agent.message", itemId: f.itemId, text: f.text });

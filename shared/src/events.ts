@@ -39,6 +39,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   EventBase.extend({
     type: z.literal("user.message"),
     itemId: z.string(),
+    clientMessageId: z.string().optional(),
     text: z.string(),
   }),
   EventBase.extend({

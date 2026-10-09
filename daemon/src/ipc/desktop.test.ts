@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, setSystemTime } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, setSystemTime, spyOn } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -131,6 +131,23 @@ async function pushBase(pipe: Awaited<ReturnType<typeof setup>>["pipe"]) {
 }
 
 describe("桌面接管链路（任务 3.1-3.4 / 4.1-4.2）", () => {
+  test("旧历史查询等待期间桌面已同步，迟到查询不能用旧内容和新水位覆盖快照", async () => {
+    const { bridge, registry, manager, pipe } = await setup();
+    let finish!: (value: { data: [] }) => void;
+    const pending = spyOn(bridge, "threadTurns").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    try {
+      const request = registry.detail("old1");
+      const observation = manager.observe("old1"); pipe.fireConnect(); await observation;
+      pipe.pushState("old1", snap(1, [
+        { id: "user", type: "userMessage", text: "新指令" },
+        { id: "reply", type: "agentMessage", text: "新回复" },
+      ]));
+      finish({ data: [] });
+      const detail = await request;
+      expect(detail.session.history.map((item) => item.id)).toEqual(["user", "reply"]);
+      expect(detail.latestSeq).toBeGreaterThan(0);
+    } finally { pending.mockRestore(); manager.shutdown(); bridge.stop(); }
+  });
   test("后台重新装配从持久记录恢复接管；释放观察只清除控制状态，不中断任务", async () => {
     const controls = new ControlStore();
     const first = await setup({ controls });

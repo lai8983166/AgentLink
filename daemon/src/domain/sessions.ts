@@ -261,7 +261,11 @@ export class SessionRegistry {
       }
     }
     // rollout 会话：按需拉历史（desc：最新 50 轮）
+    const latestSeq = this.bus.latestSeq(id);
+    const serverEpoch = this.bus.epoch;
     const turns = await this.bridge.threadTurns(id).catch(() => null);
+    // 请求等待期间桌面快照可能已经落位，必须优先返回实时权威历史。
+    if (this.live.has(id) || this.desktop?.historyFor(id)) return this.detail(id);
     if (!turns && !this.knownCodexThreads.has(id)) {
       throw new DaemonError("SESSION_NOT_FOUND", "会话不存在");
     }
@@ -285,7 +289,7 @@ export class SessionRegistry {
         pendingApprovals: 0,
       } satisfies SessionSummary);
     return { session: { ...base, history, tokenUsage: null, approvals: this.approvals.snapshot(id),
-      controlMode: base.desktopManaged ? "observe" : "local" }, latestSeq: this.bus.latestSeq(id), serverEpoch: this.bus.epoch };
+      controlMode: base.desktopManaged ? "observe" : "local" }, latestSeq, serverEpoch };
   }
 
   private historyFromTurns(turns: { data?: Array<{ items?: Array<Record<string, unknown>> }> } | null): HistoryItem[] {
