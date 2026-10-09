@@ -18,6 +18,14 @@ describe("visibleDecisions（任务 7.5：动态按钮）", () => {
 });
 
 describe("applyEventToHistory（任务 7.2/7.4：事件增量）", () => {
+  test("迟到的用户事件按桌面后继位置插入，并保留手机关联 ID", () => {
+    const history: HistoryItem[] = [{ id: "model", type: "agentMessage", text: "回复", at: 1 }];
+    const event = { type: "user.message" as const, sessionId: "s", seq: 2, at: 2, itemId: "server", clientMessageId: "phone", beforeItemId: "model", text: "继续" };
+    const next = applyEventToHistory(history, event);
+    expect(next.map((item) => item.id)).toEqual(["server", "model"]);
+    expect(next[0]).toMatchObject({ clientMessageId: "phone" });
+    expect(applyEventToHistory(next, { ...event, seq: 3 })).toHaveLength(2);
+  });
   test("agent.message 首见部分文本 → 后续全文更新（快照差分语义）", () => {
     let h: HistoryItem[] = [];
     h = applyEventToHistory(h, { type: "agent.message", sessionId: "s", seq: 1, at: 1, itemId: "m1", text: "正在" });

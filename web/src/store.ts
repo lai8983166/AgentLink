@@ -39,9 +39,17 @@ export function visibleDecisions(available: Array<string | Record<string, unknow
 /** 事件 → 历史条目增量（会话详情缓存更新的纯函数，测试覆盖） */
 export function applyEventToHistory(history: HistoryItem[], e: SessionEvent): HistoryItem[] {
   switch (e.type) {
-    case "user.message":
-      if (history.some((h) => h.type === "userMessage" && h.id === e.itemId)) return history;
-      return [...history, { type: "userMessage", id: e.itemId, text: e.text, at: e.at }];
+    case "user.message": {
+      const idx = history.findIndex((h) => h.type === "userMessage" && (h.id === e.itemId ||
+        (!!e.clientMessageId && h.clientMessageId === e.clientMessageId)));
+      const item = { type: "userMessage" as const, id: e.itemId, text: e.text, at: e.at,
+        ...(e.clientMessageId ? { clientMessageId: e.clientMessageId } : {}) };
+      const next = [...history];
+      const updated = idx < 0 ? item : { ...next.splice(idx, 1)[0]!, ...item };
+      const successor = e.beforeItemId ? next.findIndex((h) => h.id === e.beforeItemId) : -1;
+      next.splice(successor >= 0 ? successor : idx >= 0 ? idx : next.length, 0, updated);
+      return next;
+    }
     case "agent.message": {
       // 同 id 消息：以最新文本为准（快照差分下首见可能是部分文本）
       const idx = history.findIndex((h) => h.type === "agentMessage" && h.id === e.itemId);
