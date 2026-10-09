@@ -15,6 +15,7 @@ const STATUS_LABEL: Record<string, string> = {
   done: "已完成",
   error: "出错",
   idle: "空闲",
+  unknown: "状态待确认",
 };
 
 /** 会话页（任务 7.4/7.5）：动作条常显 + 流式 + 工具卡片 + 审批 + 排队 + 滚动跟随 */

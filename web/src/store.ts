@@ -114,4 +114,5 @@ export const STATUS_ORDER: Record<SessionStatus, number> = {
   done: 2,
   error: 3,
   idle: 4,
+  unknown: 5,
 };

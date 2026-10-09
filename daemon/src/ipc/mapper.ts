@@ -46,7 +46,7 @@ export interface DesktopState {
 
 /** 差分产出的事件（无 seq/at，由总线补齐） */
 export type DesktopFact =
-  | { kind: "session.status"; status: "running" | "waiting_approval" | "done" | "error" | "idle"; activity: string | null }
+  | { kind: "session.status"; status: "running" | "waiting_approval" | "done" | "error" | "idle" | "unknown"; activity: string | null }
   | { kind: "user.message"; itemId: string; text: string }
   | { kind: "agent.message"; itemId: string; text: string }
   | { kind: "agent.delta"; itemId: string; delta: string }
@@ -284,7 +284,7 @@ export function desktopStatusFact(next: DesktopState): Extract<DesktopFact, { ki
   if (last.status === "inProgress" || last.status === "running") return { kind: "session.status", status: "running", activity: null };
   if (last.status === "failed" || last.status === "error") return { kind: "session.status", status: "error", activity: null };
   if (last.status === "interrupted") return { kind: "session.status", status: "idle", activity: null };
-  return { kind: "session.status", status: "done", activity: null };
+  return { kind: "session.status", status: last.status === "completed" ? "done" : "unknown", activity: null };
 }
 
 /** 差分：prev → next 产出事件序列 */

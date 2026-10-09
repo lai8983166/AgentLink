@@ -24,6 +24,7 @@ export class IpcFollowerSession {
   mode: FollowerMode = "observe";
   ownerClientId: string | null = null;
   lastState: DesktopState | null = null;
+  lastStateAt = 0;
   ownerLost = false;
 
   /** 差分事实出口（由 DesktopSessionManager 接到事件总线/审批域） */
@@ -63,6 +64,7 @@ export class IpcFollowerSession {
     this.ownerLost = false;
     if (this.ownerClientId !== res.handledByClientId) {
       this.lastState = null;
+      this.lastStateAt = 0;
       this.suppressNextDiff = true;
     }
     this.ownerClientId = res.handledByClientId;
@@ -99,6 +101,7 @@ export class IpcFollowerSession {
     this.followTimer = null;
     this.startPromise = null;
     this.lastState = null;
+    this.lastStateAt = 0;
     await this.start();
   }
 
@@ -155,6 +158,7 @@ export class IpcFollowerSession {
       }
       const facts = diffDesktopState(this.lastState, next);
       this.lastState = next;
+      this.lastStateAt = Date.now();
       this.emitFacts(facts);
       return;
     }
@@ -174,6 +178,7 @@ export class IpcFollowerSession {
       }
       const facts = diffDesktopState(this.lastState, next);
       this.lastState = next;
+      this.lastStateAt = Date.now();
       this.emitFacts(facts);
       return;
     }
@@ -186,6 +191,7 @@ export class IpcFollowerSession {
   private takeBaseline(next: DesktopState): void {
     this.suppressNextDiff = false;
     this.lastState = next;
+    this.lastStateAt = Date.now();
     this.onFacts([
       { kind: "history.sync" },
       // 首帧也同步当前审批，但不重放完整消息/工具历史。

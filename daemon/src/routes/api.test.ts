@@ -77,7 +77,7 @@ describe("REST API", () => {
     const res = await app.request("/api/v1/sessions", { headers: authed });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { sessions: Array<{ id: string; status: string }> };
-    expect(body.sessions.some((s) => s.id === "old1" && s.status === "idle")).toBe(true);
+    expect(body.sessions.some((s) => s.id === "old1" && s.status === "unknown")).toBe(true);
   });
 
   test("创建会话：合法路径 201；白名单外 409 PATH_NOT_ALLOWED", async () => {

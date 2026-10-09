@@ -9,7 +9,6 @@ import { useEffect } from "react";
 
 /** 电脑上正被其他入口使用的会话排在运行中之后、已完成之前 */
 function effectiveOrder(s: SessionSummary): number {
-  if (s.activeElsewhere && s.status === "idle") return STATUS_ORDER.running + 0.5;
   return STATUS_ORDER[s.status];
 }
 
@@ -59,10 +58,10 @@ export function Home() {
   );
   const waiting = sessions.filter((s) => s.status === "waiting_approval");
   const active = sessions.filter(
-    (s) => s.status === "running" || s.status === "waiting_approval" || s.activeElsewhere,
+    (s) => s.status === "running" || s.status === "waiting_approval",
   );
   const rest = sessions.filter(
-    (s) => s.status !== "running" && s.status !== "waiting_approval" && !s.activeElsewhere,
+    (s) => s.status !== "running" && s.status !== "waiting_approval",
   );
   const rate = statusQ.data?.rateLimits;
 
@@ -150,7 +149,7 @@ export function Home() {
           <SessionCard key={s.id} s={s} alert={s.status === "waiting_approval"} />
         ))}
 
-        {rest.length > 0 && <div className="section-label">已完成 / 空闲</div>}
+        {rest.length > 0 && <div className="section-label">其他会话</div>}
         {rest.map((s) => (
           <SessionCard key={s.id} s={s} dim={s.status === "idle"} />
         ))}
@@ -176,9 +175,10 @@ function SessionCard({ s, alert, dim }: { s: SessionSummary; alert?: boolean; di
     waiting_approval: "等待审批",
     done: "已完成",
     error: "出错",
-    idle: s.activeElsewhere ? `${s.activeVia ?? "电脑"}运行中` : "空闲",
+    idle: "空闲",
+    unknown: s.desktopGone ? "电脑端未连接" : "状态待确认",
   };
-  const dot = s.status === "waiting_approval" ? "waiting" : s.activeElsewhere ? "running" : s.status;
+  const dot = s.status === "waiting_approval" ? "waiting" : s.status;
   return (
     <Link to={`/${s.id}`} className={`card${alert ? " alert" : ""}${dim ? " dim" : ""}`} style={{ textDecoration: "none", color: "inherit", display: "block" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
