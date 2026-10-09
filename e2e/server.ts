@@ -1,5 +1,5 @@
 // 仅供测试：独立端口、临时数据库、模拟桌面，无 Codex 进程或真实 IPC。
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, websocket, type DaemonApp } from "../daemon/src/server";
@@ -10,6 +10,10 @@ import { IpcClient, type PipeLikeSocket } from "../daemon/src/ipc/client";
 
 const token = "isolated-e2e-token";
 const root = mkdtempSync(join(tmpdir(), "agentlink-e2e-"));
+const webDist = join(import.meta.dir, "../web/dist");
+const builtVersion = JSON.parse(readFileSync(join(webDist, "version.json"), "utf8")).build as string;
+let pwaVersion: "old" | "legacy" | "new" | null = null;
+const legacyPage = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>旧桌面入口<script>navigator.serviceWorker.register("/sw.js",{scope:"/"})</script></body></html>';
 let caseNumber = 0;
 let auditPath = "";
 let fixture: DaemonApp;
@@ -72,6 +76,7 @@ function commandRequest(id: number, kind = "command") {
 async function build(reset: boolean) {
   fixture?.desktop?.shutdown(); fixture?.bridge.stop(); fixture?.audit.close(); fixture?.controls.close();
   if (reset) {
+    pwaVersion = null;
     auditPath = join(root, String(++caseNumber), "audit.db");
     state = { revision: 1, requests: [commandRequest(2)], status: "inProgress", items: [], approvalReject: false, sends: [], approvalMethods: [], delayedMessages: false, turns: [] };
   }
@@ -83,6 +88,7 @@ async function build(reset: boolean) {
   fixture.app.post("/__test__/control", async (c) => {
     const action = await c.req.json();
     if (action.type === "reset") await build(true);
+    else if (action.type === "pwaVersion") pwaVersion = action.version;
     else if (action.type === "restart") { await build(false); for (const socket of sockets) socket.close(1012, "fixture restart"); }
     else if (action.type === "rejectApproval") state.approvalReject = action.enabled;
     else if (action.type === "fileApproval") { state.requests = [commandRequest(3, "fileChange")]; state.revision++; push(); }
@@ -103,7 +109,25 @@ async function build(reset: boolean) {
     resumeCalls: fake.written.filter((line) => JSON.parse(line).method === "thread/resume").length }));
 }
 await build(true);
-Bun.serve({ hostname: "127.0.0.1", port: 48917, fetch: (req, server) => fixture.app.fetch(req, server), websocket: {
+Bun.serve({ hostname: "127.0.0.1", port: 48917, fetch: (req, server) => {
+  const pathname = new URL(req.url).pathname;
+  // Serve two versions without modifying production dist or connecting to real user sessions.
+  if (pwaVersion && pathname === "/version.json") {
+    return Response.json({ build: pwaVersion === "new" ? builtVersion : "pwa-old" }, { headers: { "Cache-Control": "no-store" } });
+  }
+  if (pwaVersion === "legacy" && (pathname === "/" || pathname === "/index.html")) {
+    return new Response(legacyPage, { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } });
+  }
+  if ((pwaVersion === "old" || pwaVersion === "legacy") && pathname === "/sw.js") {
+    const script = readFileSync(join(webDist, "sw.js"), "utf8").replace(/revision:(?:null|"[^"]+")/g, 'revision:"pwa-old"');
+    return new Response(script + "\n// isolated old PWA\n", { headers: { "Content-Type": "application/javascript", "Cache-Control": "no-store" } });
+  }
+  if ((pwaVersion === "old" || pwaVersion === "legacy") && /^\/assets\/[a-zA-Z0-9_-]+\.js$/.test(pathname)) {
+    const script = readFileSync(join(webDist, pathname.slice(1)), "utf8").replaceAll(builtVersion, "pwa-old");
+    return new Response(script, { headers: { "Content-Type": "application/javascript", "Cache-Control": "no-store" } });
+  }
+  return fixture.app.fetch(req, server);
+}, websocket: {
   ...websocket,
   open(ws) { sockets.add(ws); websocket.open?.(ws); },
   close(ws, code, reason) { sockets.delete(ws); websocket.close?.(ws, code, reason); },
