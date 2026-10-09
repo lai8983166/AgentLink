@@ -42,6 +42,7 @@ export class IpcClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffMs = 500;
   private shouldConnect = false;
+  private readyWaiters = new Set<{ resolve: () => void; reject: (e: Error) => void }>();
 
   constructor(
     private readonly socketFactory: PipeSocketFactory = createRealPipeSocket,
@@ -55,8 +56,9 @@ export class IpcClient {
 
   disconnect(): void {
     this.shouldConnect = false;
-    this.socket?.destroy();
-    this.socket = null;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.handleClose();
     this.setState("idle");
   }
 
@@ -81,29 +83,44 @@ export class IpcClient {
       return;
     }
     this.socket = socket;
-    socket.on("error", () => this.handleClose());
-    socket.on("close", () => this.handleClose());
-    socket.on("data", (d) => this.feed(d));
+    this.buf = Buffer.alloc(0);
+    socket.on("error", () => this.handleClose(socket));
+    socket.on("close", () => this.handleClose(socket));
+    socket.on("data", (d) => { if (this.socket === socket) this.feed(d); });
     socket.on("connect", () => {
-      this.setState("open");
-      this.backoffMs = 500;
+      if (this.socket !== socket) return;
       // 每次连接（含重连）都重新握手
       this.initialize()
         .then((info) => {
+          if (this.socket !== socket) return;
           this.peerInfo = (info ?? {}) as Record<string, unknown>;
+          this.setState("open");
+          this.backoffMs = 500;
+          for (const waiter of this.readyWaiters) waiter.resolve();
+          this.readyWaiters.clear();
           this.log("[ipc] 已连接桌面 IPC，对端:", JSON.stringify(info).slice(0, 120));
           this.onConnected?.();
         })
-        .catch((e) => this.log("[ipc] initialize 失败:", e.message));
+        .catch((e) => {
+          if (this.socket !== socket) return;
+          this.log("[ipc] initialize 失败:", e.message);
+          this.handleClose(socket);
+        });
     });
   }
 
   /** 连接建立后的钩子（Follower 重订阅等） */
   onConnected: () => void = () => {};
 
-  private handleClose(): void {
-    if (!this.socket) return;
+  private handleClose(socket = this.socket): void {
+    if (!socket || this.socket !== socket) return;
     this.socket = null;
+    this.buf = Buffer.alloc(0);
+    this.peerInfo = null;
+    this.clientId = "initializing-client";
+    socket.destroy();
+    for (const waiter of this.readyWaiters) waiter.reject(new Error("IPC_UNAVAILABLE: 桌面连接已断开"));
+    this.readyWaiters.clear();
     for (const [, p] of this.pending) {
       clearTimeout(p.timer);
       p.resolve({ type: "response", requestId: "", error: { message: `ipc closed: ${p.method}` } });
@@ -127,6 +144,11 @@ export class IpcClient {
     for (;;) {
       if (this.buf.length < 4) return;
       const len = this.buf.readUInt32LE(0);
+      if (len > 64 * 1024 * 1024) {
+        this.log("[ipc] 拒绝过大的数据帧");
+        this.handleClose();
+        return;
+      }
       if (this.buf.length < 4 + len) return;
       const body = this.buf.subarray(4, 4 + len);
       this.buf = this.buf.subarray(4 + len);
@@ -165,7 +187,7 @@ export class IpcClient {
   }
 
   private sendRaw(obj: unknown): void {
-    if (!this.socket) return;
+    if (!this.socket) throw new Error("IPC_UNAVAILABLE: 桌面连接已断开");
     const data = Buffer.from(JSON.stringify(obj));
     const head = Buffer.alloc(4);
     head.writeUInt32LE(data.length);
@@ -174,6 +196,7 @@ export class IpcClient {
 
   /** 定向 broadcast（follower 订阅/续订用） */
   sendBroadcast(method: string, params: unknown, targetClientIds: string[]): void {
+    if (this.state !== "open") return;
     this.sendRaw({
       type: "broadcast",
       sourceClientId: this.clientId,
@@ -204,6 +227,21 @@ export class IpcClient {
 
   /** 返回完整响应对象（owner-discovery 等把字段放顶层的场景） */
   callFull(method: string, params?: unknown, targetClientId?: string): Promise<IpcResponse> {
+    if (method !== "initialize" && this.state !== "open") {
+      if (!this.shouldConnect || !this.socket) return Promise.reject(new Error("IPC_UNAVAILABLE: 桌面连接未就绪"));
+      return new Promise<void>((resolve, reject) => {
+        const waiter = {
+          resolve: () => { clearTimeout(timer); resolve(); },
+          reject: (e: Error) => { clearTimeout(timer); reject(e); },
+        };
+        const timer = setTimeout(() => {
+          this.readyWaiters.delete(waiter);
+          reject(new Error("IPC_UNAVAILABLE: 桌面握手超时"));
+        }, this.opts.callTimeoutMs ?? 8000);
+        this.readyWaiters.add(waiter);
+      }).then(() => this.callFull(method, params, targetClientId));
+    }
+    if (!this.socket) return Promise.reject(new Error("IPC_UNAVAILABLE: 桌面连接已断开"));
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -220,7 +258,7 @@ export class IpcClient {
           resolve(r);
         },
       });
-      this.sendRaw({
+      try { this.sendRaw({
         type: "request",
         requestId,
         sourceClientId: this.clientId,
@@ -229,7 +267,11 @@ export class IpcClient {
         params,
         targetClientId,
         timeoutMs: this.opts.callTimeoutMs ?? 8000,
-      });
+      }); } catch (e) {
+        clearTimeout(timer);
+        this.pending.delete(requestId);
+        reject(e);
+      }
     });
   }
 
@@ -239,7 +281,8 @@ export class IpcClient {
       "initialize",
       { clientType: "agentlink-daemon" },
     );
-    if (result?.clientId) this.clientId = result.clientId;
+    if (!result?.clientId) throw new Error("IPC_INCOMPATIBLE: 桌面握手缺少 clientId");
+    this.clientId = result.clientId;
     return result;
   }
 }
