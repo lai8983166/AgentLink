@@ -321,6 +321,16 @@ body {
   max-height: 25%;
   overflow-y: auto;
 }
+.composer-at-top .composer,
+.composer-at-top .composer-notice {
+  order: -1;
+}
+.composer-at-top .composer {
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-bottom: 10px;
+  border-top: 0;
+  border-bottom: 1px solid var(--border-soft);
+}
 
 .section-label {
   font-family: var(--mono);

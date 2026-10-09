@@ -43,6 +43,7 @@ function SessionView() {
     onAccepted: () => { queryClient.invalidateQueries({ queryKey: ["session", sessionId] }); },
   });
   const wsConnected = useStore((s) => s.wsConnected);
+  const inputAtTop = useStore((s) => s.inputAtTop);
   const [interrupting, setInterrupting] = useState(false);
   const [busyError, setBusyError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState(new Map<string, { req: PendingApprovalUI; resolved: { decision: string } | null }>());
@@ -234,7 +235,7 @@ function SessionView() {
   const approvalList = [...approvals.entries()];
 
   return (
-    <div className="session-page" style={viewportStyle}>
+    <div className={`session-page${inputAtTop ? " composer-at-top" : ""}`} style={viewportStyle}>
       <div className="session-header">
       <div className="topbar">
         <Link to="/" className="back">

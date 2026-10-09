@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../runtime";
 import { useStore } from "../store";
 import { applyAppUpdate, checkAppUpdate, useAppUpdate } from "../app-updater";
+import { KeyboardDiagnostics } from "../components/KeyboardDiagnostics";
 
 /** 设置页（任务 7.7）：连接状态 / 通知说明 / 审计入口 / 解除配对 */
 export function Settings() {
@@ -60,6 +61,7 @@ export function Settings() {
           </div>
         </div>
 
+        <KeyboardDiagnostics />
         <div className="section-label">通知（ntfy）</div>
         <div className="card" style={{ cursor: "default", fontSize: 13, color: "var(--text-dim)", lineHeight: 1.7 }}>
           通知经 ntfy App 推送（审批 / 完成 / 出错），在手机 ntfy 中订阅：

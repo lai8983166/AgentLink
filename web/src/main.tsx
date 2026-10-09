@@ -6,7 +6,9 @@ import { App } from "./App";
 import { queryClient } from "./runtime";
 import "./theme.css";
 import { startAppUpdates } from "./app-updater";
+import { configureKeyboardLayout } from "./visible-viewport";
 
+configureKeyboardLayout();
 startAppUpdates();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
