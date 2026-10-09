@@ -9,6 +9,7 @@ import { ToolCard } from "../components/ToolCard";
 import { MarkdownLite } from "../components/Markdown";
 import { DesktopBanner } from "../components/DesktopBanner";
 import { applySessionEvent, mergeSessionDetail } from "../session-state";
+import { useMessageOutbox } from "../message-outbox";
 
 const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -33,7 +34,7 @@ function SessionView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
   const [queue, setQueue] = useState(0);
-  const [input, setInput] = useState("");
+  const { input, setInput, sending, notice, uncertain, submit, recheck } = useMessageOutbox(sessionId);
   const [busyError, setBusyError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState(new Map<string, { req: PendingApprovalUI; resolved: { decision: string } | null }>());
   const [liveStatus, setLiveStatus] = useState<{ status: string; activity: string | null } | null>(null);
@@ -217,14 +218,7 @@ function SessionView() {
   }, [search, setSearch, approvals.size]);
 
   async function send() {
-    const text = input.trim();
-    if (!text) return;
-    setInput("");
-    try {
-      await api.sendMessage(sessionId, text);
-    } catch {
-      setInput(text); // 失败还原输入
-    }
+    if (canDrive && !sending) await submit();
   }
 
   const history = useMemo(() => session?.history ?? [], [session]);
@@ -395,6 +389,9 @@ function SessionView() {
       )}
 
       {/* 输入栏 */}
+      {notice && <div role="status" style={{ position: "fixed", bottom: 76, left: 14, right: 14, fontSize: 12, background: "var(--surface)", padding: 8 }}>
+        {notice} {uncertain && <button onClick={recheck}>核对发送结果</button>}
+      </div>}
       <div
         style={{
           position: "fixed",
@@ -412,7 +409,7 @@ function SessionView() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
-          disabled={!canDrive}
+          disabled={!canDrive || sending}
           placeholder={
             !canDrive
               ? "观察模式 · 点上方「接管此会话」后可发指令"
@@ -434,7 +431,7 @@ function SessionView() {
         <button
           className="btn"
           style={{ width: 46, height: 42, flexShrink: 0, padding: 0 }}
-          disabled={!input.trim()}
+          disabled={!input.trim() || !canDrive || sending || uncertain}
           onClick={send}
         >
           ↑

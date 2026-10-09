@@ -17,6 +17,8 @@ import { DesktopSessionManager } from "./ipc/desktop-manager";
 import { NtfyGateway, type NtfyConfig } from "./notify/ntfy";
 import { DAEMON_VERSION } from "./server-version";
 import { randomUUID } from "node:crypto";
+import { ControlStore } from "./domain/control-store";
+import { configDir } from "./config";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
 
@@ -51,7 +53,8 @@ export function createApp(opts: {
   const audit = new AuditStore(opts.auditPath);
   const approvals = new ApprovalService(opts.bridge, bus, audit);
   const fs = new FsService(opts.allowedRoots);
-  const registry = new SessionRegistry(opts.bridge, bus, approvals, fs);
+  const controls = new ControlStore(opts.auditPath ? `${opts.auditPath}.controls` : join(configDir(), "controls.db"));
+  const registry = new SessionRegistry(opts.bridge, bus, approvals, fs, controls);
 
   // 账户限额（app-server 通知 + 桌面会话 rollout 尾读）：状态 pill / 用尽告警
   const limits = new LimitsMonitor();

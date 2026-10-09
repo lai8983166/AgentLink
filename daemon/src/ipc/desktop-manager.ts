@@ -30,7 +30,6 @@ export class DesktopSessionManager {
   private statusTimes = new Map<string, number>();
   private summarySync: Promise<void> | null = null;
   /** 消息幂等：conversationId → 最近的 {id, text, at} */
-  private lastSend = new Map<string, { id: string; text: string; at: number }>();
 
   /** registry 注入：桌面会话摘要变化时重发合并后的列表事件 */
   onSummaryChange: (conversationId: string) => void = () => {};
@@ -249,16 +248,11 @@ export class DesktopSessionManager {
 
   /** 接管态发消息（任务 3.3）：clientUserMessageId 幂等（60s 内同文本重试复用）。
    *  失败（额度用尽/桌面拒绝等）→ error 事件让手机立刻看到原因，而不是静默恢复输入框 */
-  async sendTurn(conversationId: string, text: string): Promise<void> {
+  async sendTurn(conversationId: string, text: string, clientMessageId: string = crypto.randomUUID()): Promise<void> {
     const f = this.sessions.get(conversationId);
     if (!f || f.mode !== "takeover") throw new Error("IPC_NOT_TAKEN_OVER: 会话未接管");
-    const prev = this.lastSend.get(conversationId);
-    const now = Date.now();
-    const reuse = prev && now - prev.at < 60_000 && prev.text === text ? prev.id : undefined;
-    const id = reuse ?? crypto.randomUUID();
-    this.lastSend.set(conversationId, { id, text, at: now });
     try {
-      await f.startTurn({ text, clientUserMessageId: id });
+      await f.startTurn({ text, clientUserMessageId: clientMessageId });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.bus.publish(conversationId, { type: "error", message: `指令发送失败：${msg}` });

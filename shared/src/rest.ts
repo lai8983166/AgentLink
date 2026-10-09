@@ -21,6 +21,7 @@ export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
 
 export const SendMessageRequest = z.object({
   text: z.string().min(1),
+  clientMessageId: z.string().min(1).max(128).optional(),
 });
 export type SendMessageRequest = z.infer<typeof SendMessageRequest>;
 

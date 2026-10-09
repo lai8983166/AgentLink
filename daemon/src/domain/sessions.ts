@@ -5,6 +5,7 @@ import type {
   SessionStatus,
   SessionSummary,
   TokenUsage,
+  MessageReceipt,
 } from "@agentlink/shared";
 import { DaemonError, type CodexBridge } from "../codex/bridge";
 import { historyItemFromCodexItem } from "../codex/mapper";
@@ -13,6 +14,7 @@ import type { CodexThreadInfo } from "../codex/protocol";
 import type { SessionEventBus } from "../events/bus";
 import type { ApprovalService } from "./approvals";
 import type { FsService } from "./fs";
+import { ControlStore } from "./control-store";
 
 /** 会话注册表（任务 4.1/4.2）：状态机 + 事件发布 + 列表聚合 */
 
@@ -34,6 +36,7 @@ interface LiveSession {
 }
 
 export class SessionRegistry {
+  private sending = new Map<string, Promise<MessageReceipt>>();
   private live = new Map<string, LiveSession>();
   private rolloutIndex = new Map<string, SessionSummary>();
   private knownCodexThreads = new Set<string>();
@@ -47,7 +50,7 @@ export class SessionRegistry {
     isTakenOver(id: string): boolean;
     overlay(): Map<string, { status: SessionStatus | null; mode: string; desktopGone: boolean; pendingApprovals?: number; statusUpdatedAt?: number }>;
     syncSummaries?(ids: string[]): Promise<void>;
-    sendTurn(id: string, text: string): Promise<void>;
+    sendTurn(id: string, text: string, clientMessageId?: string): Promise<void>;
     interrupt(id: string): Promise<void>;
     /** 观察中会话的快照历史（完整直出，避免 diff 事件重复/截断） */
     historyFor(id: string): import("@agentlink/shared").HistoryItem[] | null;
@@ -96,6 +99,7 @@ export class SessionRegistry {
     private readonly bus: SessionEventBus,
     private readonly approvals: ApprovalService,
     private readonly fs: FsService,
+    private readonly controls: ControlStore = new ControlStore(),
   ) {}
 
   async start(): Promise<void> {
@@ -342,11 +346,44 @@ export class SessionRegistry {
     return session;
   }
 
-  async sendMessage(id: string, text: string): Promise<void> {
+  sendMessage(id: string, text: string, clientMessageId: string = crypto.randomUUID()): Promise<MessageReceipt> {
+    const key = `${id}:${clientMessageId}`;
+    const previous = this.controls.delivery(id, clientMessageId);
+    if (previous && previous.text !== text) throw new DaemonError("VALIDATION_ERROR", "同一消息 ID 不能用于不同内容");
+    const pending = this.sending.get(key);
+    if (pending) return pending;
+    if (previous?.state === "accepted") return Promise.resolve(previous);
+    if (previous?.state === "uncertain" || previous?.state === "sending") throw new DaemonError("MESSAGE_UNCERTAIN", "这条指令的接收结果待确认，请先核对原会话，避免重复执行");
+    const result = Promise.resolve().then(async () => {
+      this.controls.saveDelivery(id, text, { clientMessageId, state: "sending", updatedAt: Date.now(), error: null });
+      try {
+        await this.dispatchMessage(id, text, clientMessageId);
+        const receipt: MessageReceipt = { clientMessageId, state: "accepted", updatedAt: Date.now(), error: null };
+        this.controls.saveDelivery(id, text, receipt);
+        return receipt;
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        const state = /timeout|closed|断开|ECONNRESET|EPIPE/i.test(error) ? "uncertain" : "failed";
+        this.controls.saveDelivery(id, text, { clientMessageId, state, updatedAt: Date.now(), error });
+        throw e;
+      }
+    }).finally(() => { this.sending.delete(key); });
+    this.sending.set(key, result);
+    return result;
+  }
+
+  messageReceipt(id: string, clientMessageId: string): MessageReceipt | null {
+    const delivery = this.controls.delivery(id, clientMessageId);
+    if (!delivery) return null;
+    const { text: _, ...receipt } = delivery;
+    return receipt;
+  }
+
+  private async dispatchMessage(id: string, text: string, clientMessageId: string): Promise<void> {
     // 桌面接管态：委托 IPC follower（任务 3.3，含 clientUserMessageId 幂等）
     if (this.desktop?.isTakenOver(id)) {
       // rollout 摘要里的默认审批策略不代表桌面的实际权限，不能用于覆盖原会话。
-      await this.desktop.sendTurn(id, text);
+      await this.desktop.sendTurn(id, text, clientMessageId);
       const base = this.rolloutIndex.get(id);
       if (base) base.lastActivityAt = Date.now();
       return;

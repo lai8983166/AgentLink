@@ -11,6 +11,7 @@ export const ApiErrorCode = z.enum([
   "IPC_UNAVAILABLE",
   "IPC_OWNER_NOT_FOUND",
   "IPC_INCOMPATIBLE",
+  "MESSAGE_UNCERTAIN",
   "PATH_NOT_ALLOWED", // 路径不在白名单
   "SNAPSHOT_REQUIRED", // lastSeq 早于事件保留窗口，需全量拉取
   "VALIDATION_ERROR",
