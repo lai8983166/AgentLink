@@ -11,6 +11,7 @@ import { DesktopBanner } from "../components/DesktopBanner";
 import { applySessionEvent, mergeSessionDetail } from "../session-state";
 import { useMessageOutbox } from "../message-outbox";
 import { mergeOutgoingHistory } from "../message-history";
+import { useVisibleViewport } from "../visible-viewport";
 
 const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -28,6 +29,7 @@ export function Session() {
 }
 
 function SessionView() {
+  const viewportStyle = useVisibleViewport();
   const { sessionId = "" } = useParams();
   const [search, setSearch] = useSearchParams();
   const navigate = useNavigate();
@@ -231,7 +233,8 @@ function SessionView() {
   const approvalList = [...approvals.entries()];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh" }}>
+    <div className="session-page" style={viewportStyle}>
+      <div className="session-header">
       <div className="topbar">
         <Link to="/" className="back">
           ‹
@@ -323,8 +326,10 @@ function SessionView() {
         {queue > 0 && <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" }}>· {queue} 条排队</span>}
       </div>
 
+      </div>
       {/* 对话流 */}
-      <div className="content" data-testid="conversation-history" ref={scrollRef} onScroll={onScroll}>
+      <div className="conversation-area">
+      <div className="content session-content" data-testid="conversation-history" ref={scrollRef} onScroll={onScroll}>
         {history.map((h) => {
           if (h.type === "userMessage") {
             return (
@@ -403,33 +408,30 @@ function SessionView() {
             setFollow(true);
             if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
           }}
-          style={{ position: "absolute", bottom: 110, left: "50%", transform: "translateX(-50%)", background: "var(--border)", color: "#fff3c4", fontFamily: "var(--mono)", fontSize: 11.5, padding: "8px 16px", borderRadius: 99, border: "1.5px solid var(--border)", boxShadow: "3px 3px 0 var(--gold)", zIndex: 20 }}
+          style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", background: "var(--border)", color: "#fff3c4", fontFamily: "var(--mono)", fontSize: 11.5, padding: "8px 16px", borderRadius: 99, border: "1.5px solid var(--border)", boxShadow: "3px 3px 0 var(--gold)", zIndex: 20 }}
         >
           ↓ 回到底部
         </div>
       )}
+      </div>
 
       {/* 输入栏 */}
-      {notice && <div role="status" style={{ position: "fixed", bottom: 76, left: 14, right: 14, fontSize: 12, background: "var(--surface)", padding: 8 }}>
+      {notice && <div role="status" className="composer-notice">
         {notice} {uncertain && <button onClick={recheck}>核对发送结果</button>}
       </div>}
       <div
+        className="composer"
         style={{
-          position: "fixed",
-          left: 0,
-          right: 0,
-          bottom: 0,
-          padding: "10px 14px 14px",
-          background: "linear-gradient(180deg, transparent, var(--bg) 30%)",
           display: "flex",
           gap: 9,
           alignItems: "flex-end",
         }}
       >
         <input
+          aria-label="消息指令"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && send()}
           disabled={!canDrive || sending}
           placeholder={
             !canDrive
@@ -440,12 +442,13 @@ function SessionView() {
           }
           style={{
             flex: 1,
+            minWidth: 0,
             background: "var(--surface)",
             border: "1.5px solid var(--border)",
             boxShadow: "2px 2px 0 var(--border)",
             borderRadius: 14,
             padding: "11px 13px",
-            fontSize: 14,
+            fontSize: 16,
             outline: "none",
           }}
         />
