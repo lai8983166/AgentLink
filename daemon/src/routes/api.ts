@@ -61,6 +61,10 @@ export function errorToResponse(c: Context, e: unknown) {
     return c.json(errorBody(e.code, e.message), status as 400 | 401 | 404 | 409 | 500);
   }
   // IPC 层错误（Error with IPC_* 前缀）
+  if (e instanceof Error && /^ipc (error|timeout)/i.test(e.message)) {
+    const message = /timeout/i.test(e.message) ? "电脑端未及时确认操作，请核对原会话后重试" : `电脑端操作失败：${e.message.replace(/^ipc error [^:]+:\s*/, "")}`;
+    return c.json(errorBody("IPC_UNAVAILABLE", message), 502);
+  }
   if (e instanceof Error && /^IPC_/.test(e.message)) {
     const code = e.message.split(":")[0] ?? "IPC_ERROR";
     return c.json(errorBody(code, e.message), code === "IPC_OWNER_NOT_FOUND" ? 404 : 502);

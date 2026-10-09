@@ -64,7 +64,10 @@ export function createRealTransportFactory(): CodexTransportFactory {
           stdin.flush();
         },
         kill() {
-          proc.kill();
+          if (proc.exitCode !== null) return;
+          if (process.platform === "win32") {
+            Bun.spawnSync(["taskkill", "/PID", String(proc.pid), "/T", "/F"], { stdout: "ignore", stderr: "ignore" });
+          } else proc.kill();
         },
         onExit(cb) {
           proc.exited.then((code) => cb(code)).catch(() => cb(null));
