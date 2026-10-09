@@ -35,6 +35,24 @@ function setup() {
 }
 
 describe("WsClient（任务 7.2）", () => {
+  test("断开后立即重连，旧 socket 的迟到关闭和消息不能破坏新连接", () => {
+    const { client, sockets } = setup();
+    const seen: unknown[] = [];
+    client.subscribeList((e) => seen.push(e));
+    client.disconnect();
+    client.connect();
+    sockets[1]!.onopen?.();
+    sockets[0]!.onclose?.();
+    sockets[0]!.serverSend({ type: "listEvent", event: { seq: 1 } });
+    expect(client.state).toBe("open");
+    expect(seen).toHaveLength(0);
+    sockets[1]!.serverSend({ type: "listEvent", event: { seq: 2 } });
+    expect(seen).toHaveLength(1);
+    client.disconnect();
+    vi.advanceTimersByTime(2000);
+    expect(sockets).toHaveLength(2);
+  });
+
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 

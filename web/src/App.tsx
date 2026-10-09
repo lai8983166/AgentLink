@@ -12,7 +12,7 @@ export function App() {
   const token = useStore((s) => s.token);
 
   useEffect(() => {
-    if (token) connectWs();
+    if (token) return connectWs();
   }, [token]);
 
   if (!token) return <PairScreen />;

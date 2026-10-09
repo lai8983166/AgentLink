@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ListEvent, SessionSummary } from "@agentlink/shared";
+import type { ListEvent, SessionSummary, SessionListResponse } from "@agentlink/shared";
 import { api, ws } from "../runtime";
 import { STATUS_ORDER, useStore } from "../store";
 import { NewTaskSheet } from "../components/NewTaskSheet";
 import { useEffect } from "react";
+import { mergeSessionList, mergeSessionSummary } from "../session-cache";
 
 /** 电脑上正被其他入口使用的会话排在运行中之后、已完成之前 */
 function effectiveOrder(s: SessionSummary): number {
@@ -20,8 +21,13 @@ export function Home() {
 
   const sessionsQ = useQuery({
     queryKey: ["sessions"],
-    queryFn: () => api.sessions(),
-    refetchInterval: 15000, // 电脑端活动（rollout updatedAt）实时反映到列表顺序
+    queryFn: async () => {
+      const incoming = await api.sessions();
+      return mergeSessionList(queryClient.getQueryData<SessionListResponse>(["sessions"]), incoming);
+    },
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchInterval: 15000,
   });
   const statusQ = useQuery({
     queryKey: ["status"],
@@ -40,12 +46,11 @@ export function Home() {
       }
       if (!("summary" in e)) return;
       queryClient.setQueryData(["sessions"], (old: { sessions: SessionSummary[] } | undefined) => {
-        if (!old) return old;
-        const list = [...old.sessions];
+        const list = [...(old?.sessions ?? [])];
         const i = list.findIndex((s) => s.id === e.summary.id);
         if (e.type === "session.deleted") {
           if (i >= 0) list.splice(i, 1);
-        } else if (i >= 0) list[i] = e.summary;
+        } else if (i >= 0) list[i] = mergeSessionSummary(list[i], e.summary);
         else list.unshift(e.summary);
         return { sessions: list };
       });
