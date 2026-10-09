@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, websocket, type DaemonApp } from "../daemon/src/server";
-import { CodexBridge } from "../daemon/src/codex/bridge";
+import { CodexBridge, DaemonError } from "../daemon/src/codex/bridge";
 import { FakeCodexServer } from "../daemon/src/testing/fake-codex";
 import { DesktopSessionManager } from "../daemon/src/ipc/desktop-manager";
 import { IpcClient, type PipeLikeSocket } from "../daemon/src/ipc/client";
@@ -20,6 +20,7 @@ let fixture: DaemonApp;
 let pipes: TestPipe[] = [];
 const sockets = new Set<{ close(code?: number, reason?: string): void }>();
 let state: { revision: number; requests: unknown[]; status: string; items: unknown[]; approvalReject: boolean; sends: string[]; approvalMethods: string[];
+  ownerAvailable: boolean; ownerError: string | null; writerHeld: boolean;
   delayedMessages: boolean; turns: Array<{ turnId: string; params: { clientUserMessageId: string }; items: unknown[]; pendingUser?: unknown }> };
 
 class TestPipe implements PipeLikeSocket {
@@ -32,6 +33,7 @@ class TestPipe implements PipeLikeSocket {
     this.emit("data", Buffer.concat([head, body]));
   }
   snapshot(): void {
+    if (!state.ownerAvailable) return;
     this.response({ type: "broadcast", params: { conversationId: "old1", change: { type: "snapshot", revision: state.revision, conversationState: {
       id: "old1", title: "远程可靠性测试",
       latestThreadSettings: { approvalPolicy: "never" },
@@ -46,7 +48,9 @@ class TestPipe implements PipeLikeSocket {
     if (msg.type === "broadcast") { if (msg.params?.following) this.snapshot(); return true; }
     if (msg.type !== "request") return true;
     if (msg.method === "initialize") this.response({ type: "response", requestId: msg.requestId, result: { clientId: "e2e-follower" } });
-    else if (msg.method === "thread-owner-discovery") this.response({ type: "response", requestId: msg.requestId, resultType: "success", handledByClientId: "e2e-owner" });
+    else if (msg.method === "thread-owner-discovery") this.response(state.ownerError || !state.ownerAvailable
+      ? { type: "response", requestId: msg.requestId, resultType: "error", error: state.ownerError ?? "no-client-found" }
+      : { type: "response", requestId: msg.requestId, resultType: "success", handledByClientId: "e2e-owner" });
     else if (msg.method.includes("approval-decision")) {
       state.approvalMethods.push(msg.method);
       if (state.approvalReject) this.response({ type: "response", requestId: msg.requestId, error: "desktop rejected" });
@@ -78,10 +82,18 @@ async function build(reset: boolean) {
   if (reset) {
     pwaVersion = null;
     auditPath = join(root, String(++caseNumber), "audit.db");
-    state = { revision: 1, requests: [commandRequest(2)], status: "inProgress", items: [], approvalReject: false, sends: [], approvalMethods: [], delayedMessages: false, turns: [] };
+    state = { revision: 1, requests: [commandRequest(2)], status: "inProgress", items: [], approvalReject: false, sends: [], approvalMethods: [], delayedMessages: false, turns: [], ownerAvailable: true, ownerError: null, writerHeld: false };
   }
   const fake = new FakeCodexServer(); const bridge = new CodexBridge(fake); await bridge.start();
-  fixture = createApp({ token, allowedRoots: [root], bridge, auditPath, desktopFactory: (bus, approvals, controls) => new DesktopSessionManager(bus, approvals, {
+  fake.onTurnStart = (params) => {
+    const threadId = params.threadId as string;
+    fake.notify("thread/status/changed", { threadId, status: { type: "active", activeFlags: [] } });
+    fake.notify("item/completed", { threadId, item: { type: "userMessage", id: crypto.randomUUID(), content: params.input } });
+  };
+  fixture = createApp({ token, allowedRoots: [root], bridge, auditPath,
+    assertNoWriter: async () => { if (state.writerHeld) throw new DaemonError("SESSION_BUSY", "原会话仍被其他入口持有，请先关闭该会话"); },
+    resumeSettings: async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }),
+    desktopFactory: (bus, approvals, controls) => new DesktopSessionManager(bus, approvals, {
     controls, log: () => {}, clientFactory: () => new IpcClient(() => { const pipe = new TestPipe(); pipes.push(pipe); queueMicrotask(() => pipe.emit("connect")); return pipe; }, { callTimeoutMs: 300 }),
   }) });
   await fixture.registry.start();
@@ -91,6 +103,8 @@ async function build(reset: boolean) {
     else if (action.type === "pwaVersion") pwaVersion = action.version;
     else if (action.type === "restart") { await build(false); for (const socket of sockets) socket.close(1012, "fixture restart"); }
     else if (action.type === "rejectApproval") state.approvalReject = action.enabled;
+    else if (action.type === "ownership") { state.ownerAvailable = action.available; state.ownerError = action.error ?? null; state.writerHeld = action.writerHeld ?? false; }
+    else if (action.type === "resumeConflict") fake.resumeError = "thread already has an active writer";
     else if (action.type === "fileApproval") { state.requests = [commandRequest(3, "fileChange")]; state.revision++; push(); }
     else if (action.type === "done") { state.status = "completed"; state.requests = []; state.revision++; push(); }
     else if (action.type === "delayMessages") state.delayedMessages = true;
@@ -106,7 +120,11 @@ async function build(reset: boolean) {
     return c.json({ ok: true });
   });
   fixture.app.post("/__test__/metrics", (c) => c.json({ sends: state.sends, approvalMethods: state.approvalMethods,
-    resumeCalls: fake.written.filter((line) => JSON.parse(line).method === "thread/resume").length }));
+    resumeCalls: fake.written.filter((line) => JSON.parse(line).method === "thread/resume").length,
+    resumes: fake.written.map((line) => JSON.parse(line)).filter((m) => m.method === "thread/resume").map((m) => m.params),
+    localSends: fake.written.map((line) => JSON.parse(line)).filter((m) => m.method === "turn/start").map((m) => m.params),
+    forkCalls: fake.written.filter((line) => JSON.parse(line).method === "thread/fork").length,
+  }));
 }
 await build(true);
 Bun.serve({ hostname: "127.0.0.1", port: 48917, fetch: (req, server) => {

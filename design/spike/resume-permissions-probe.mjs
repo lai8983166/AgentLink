@@ -16,11 +16,14 @@ const at = new Date().toISOString();
 const day = at.slice(0, 10).split('-');
 const directory = join(root, 'sessions', ...day);
 mkdirSync(directory, { recursive: true });
-writeFileSync(join(root, 'config.toml'), 'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n[projects.' + JSON.stringify(root) + ']\ntrust_level = "trusted"\n');
+const workspace = { writable_roots: [join(root, 'extra-write')], network_access: true, exclude_tmpdir_env_var: true, exclude_slash_tmp: true };
+mkdirSync(workspace.writable_roots[0]);
+const sandboxPolicy = process.argv[3] === 'workspace' ? { type: 'workspace-write', ...workspace } : { type: 'danger-full-access' };
+writeFileSync(join(root, 'config.toml'), 'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n[windows]\nsandbox = "elevated"\n[projects.' + JSON.stringify(root) + ']\ntrust_level = "trusted"\n');
 const records = [
   { type: 'session_meta', payload: { id: threadId, timestamp: at, cwd: root, originator: 'codex_vscode', cli_version: '0.160.0', source: 'vscode', model_provider: 'openai', base_instructions: { text: 'Isolated compatibility fixture. Do not execute tools.' } } },
   { type: 'event_msg', payload: { type: 'task_started', turn_id: turnId, model_context_window: 272000 } },
-  { type: 'turn_context', payload: { turn_id: turnId, cwd: root, approval_policy: 'never', sandbox_policy: { type: 'danger-full-access' }, permission_profile: { type: 'disabled' }, model: 'gpt-5.4', summary: 'auto', effort: 'medium' } },
+  { type: 'turn_context', payload: { turn_id: turnId, cwd: root, approval_policy: 'never', sandbox_policy: sandboxPolicy, ...(sandboxPolicy.type === 'danger-full-access' ? { permission_profile: { type: 'disabled' } } : {}), model: 'gpt-5.4', summary: 'auto', effort: 'medium' } },
   { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Synthetic history; no real model task.' }] } },
   { type: 'event_msg', payload: { type: 'user_message', message: 'Synthetic history; no real model task.', images: [], local_images: [], text_elements: [] } },
   { type: 'event_msg', payload: { type: 'task_complete', turn_id: turnId, last_agent_message: 'Synthetic response.' } },
@@ -49,11 +52,19 @@ function call(method, params) {
 try {
   await call('initialize', { clientInfo: { name: 'agentlink_isolated_resume_probe', version: '0.1.0' } });
   proc.stdin.write(JSON.stringify({ method: 'initialized' }) + '\n');
-  const resumed = await call('thread/resume', { threadId, ...(process.argv[3] === 'explicit' ? { sandbox: 'danger-full-access' } : {}) });
+  const resumed = await call('thread/resume', { threadId,
+    ...(process.argv[3] === 'explicit' ? { sandbox: 'danger-full-access' } : {}),
+    ...(process.argv[3] === 'workspace' ? { sandbox: 'workspace-write', config: { sandbox_workspace_write: workspace } } : {}),
+  });
   assert.equal(resumed.thread.id, threadId);
   assert.equal(resumed.approvalPolicy, 'never');
   assert.ok(resumed.thread.turns?.flatMap((t) => t.items ?? []).length > 0);
   if (process.argv[3] === 'explicit') assert.equal(resumed.sandbox.type, 'dangerFullAccess');
+  if (process.argv[3] === 'workspace') {
+    assert.equal(resumed.sandbox.type, 'workspaceWrite'); assert.equal(resumed.sandbox.networkAccess, true);
+    assert.equal(resumed.sandbox.excludeTmpdirEnvVar, true); assert.equal(resumed.sandbox.excludeSlashTmp, true);
+    assert.ok(resumed.sandbox.writableRoots.some((path) => resolve(path) === resolve(workspace.writable_roots[0])));
+  }
   console.log(JSON.stringify({ sameThread: resumed.thread.id === threadId, approvalPolicy: resumed.approvalPolicy, sandbox: resumed.sandbox, historyItems: resumed.thread.turns?.flatMap((t) => t.items ?? []).length }));
 } catch (e) { console.error(e.message, errors); process.exitCode = 1; }
 finally {

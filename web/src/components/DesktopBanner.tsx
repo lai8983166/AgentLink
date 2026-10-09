@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../runtime";
+import type { SessionDetailResponse } from "@agentlink/shared";
 
 /**
  * 桌面会话横幅（任务 5.1/5.2/5.3）：
@@ -16,16 +17,18 @@ export function DesktopBanner(props: {
   forkedFromId: string | null;
   forkedToId: string | null;
   onTakenOver: () => void;
+  onResumed?: (detail: SessionDetailResponse) => void;
   onForked?: (newSessionId: string) => void;
 }) {
-  const { sessionId, activeElsewhere, activeVia, desktopGone, desktopManaged, takenOver, forkedFromId, forkedToId, onTakenOver, onForked } = props;
+  const { sessionId, activeElsewhere, activeVia, desktopGone, desktopManaged, takenOver, forkedFromId, forkedToId, onTakenOver, onResumed, onForked } = props;
   const [busy, setBusy] = useState(false);
   const [ipcFailed, setIpcFailed] = useState(false);
   const [forking, setForking] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 已接管：不显示横幅（正常驾驶中）
-  if (takenOver) {
+  if (takenOver && !desktopGone) {
     return forkedFromId ? (
       <div style={hint}>
         <span>🧬 此会话从 <i className="hash">#</i>{forkedFromId.slice(0, 8)} 接力而来（历史完整继承）</span>
@@ -76,14 +79,32 @@ export function DesktopBanner(props: {
     }
   }
 
+  async function handleResume() {
+    setResuming(true);
+    setError(null);
+    try {
+      const result = await api.resume(sessionId);
+      onResumed?.(result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "恢复原会话失败，请稍后重试");
+    } finally { setResuming(false); }
+  }
+
+  const resumeButton = onResumed && (
+    <button className="btn" style={actionStyle} disabled={busy || forking || resuming} onClick={handleResume}>
+      {resuming ? "检查并恢复中…" : "继续原会话"}
+    </button>
+  );
+
   if (ipcFailed) {
     return (
       <div style={{ ...banner, background: "var(--red-bg)", color: "var(--red)" }}>
         <span>⚠️ {error ?? "委托通道不可用（找不到会话拥有者）"}</span>
+        {resumeButton}
         <button
           className="btn ghost"
           style={{ height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 }}
-          disabled={forking}
+          disabled={busy || forking || resuming}
           onClick={handleFork}
         >
           {forking ? "接力中…" : "接力为新会话（继承全部历史）"}
@@ -95,12 +116,13 @@ export function DesktopBanner(props: {
   return (
     <div style={{ ...banner, background: "var(--gold)", color: "var(--text)" }}>
       <span>
-        ⏳ {error ?? (desktopGone ? "电脑端连接不可用，请打开原会话后重试" : `${activeVia ?? "电脑端"}原会话 · 可观察或接管`)}
+        ⏳ {error ?? (desktopGone ? "电脑端连接不可用；会话已关闭时，可继续原会话" : `${activeVia ?? "电脑端"}原会话 · 可观察或接管`)}
       </span>
+      {resumeButton}
       <button
         className="btn"
         style={{ height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 }}
-        disabled={busy}
+        disabled={busy || forking || resuming}
         onClick={handleTakeover}
       >
         {busy ? "接管中…" : "接管此会话"}
@@ -111,6 +133,7 @@ export function DesktopBanner(props: {
 
 const banner: React.CSSProperties = {
   display: "flex",
+  flexWrap: "wrap",
   alignItems: "center",
   gap: 10,
   padding: "10px 16px",
@@ -119,6 +142,8 @@ const banner: React.CSSProperties = {
   fontWeight: 550,
   flexShrink: 0,
 };
+
+const actionStyle: React.CSSProperties = { height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 };
 
 const hint: React.CSSProperties = {
   padding: "8px 16px",
