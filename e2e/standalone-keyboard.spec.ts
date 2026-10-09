@@ -59,6 +59,38 @@ async function aboveKeyboard(page: Page, top: number) {
   expect(button.y + button.height).toBeLessThanOrEqual(top);
 }
 
+test("Android 桌面入口完全不反馈键盘尺寸时自动显示顶部输入，草稿、诊断和点击发送有效", async ({ page, request }, testInfo) => {
+  await installedKeyboard(page, false);
+  // Model the Android shortcut on both projects; the real mobile project also sends via touch.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Android XiaoMi/MiuiBrowser" });
+    Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, value: 1 });
+  });
+  await page.goto("/old1"); await page.getByRole("button", { name: "接管此会话" }).click();
+  const root = page.locator(".session-page");
+  const input = page.getByRole("textbox", { name: "消息指令" }); await input.fill("无尺寸反馈也能发送");
+  const initialHeight = await page.evaluate(() => innerHeight);
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("test:keyboard", { detail: { top: 350, silent: true, noGeometry: true } })));
+  await expect(root).toHaveAttribute("data-input-layout", "auto-top"); await aboveKeyboard(page, 350);
+  await expect(input).toBeFocused(); await expect(input).toHaveValue("无尺寸反馈也能发送");
+  expect(await page.evaluate(() => visualViewport!.height)).toBe(initialHeight);
+  expect(await root.evaluate((element) => element.getBoundingClientRect().height)).toBe(initialHeight);
+  expect(await page.evaluate(() => localStorage.getItem("agentlink-input-at-top"))).toBeNull();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("agentlink-keyboard-layout") ?? "[]").at(-1)?.inputLayout)).toBe("auto-top");
+  await page.screenshot({ path: testInfo.outputPath("keyboard-without-signals.png") });
+  const send = page.getByRole("button", { name: "↑" });
+  if (testInfo.project.name === "mobile") await send.tap(); else await send.click();
+  await expect(input).toHaveValue("");
+  await expect(page.getByText("电脑端已接收", { exact: true })).toBeVisible();
+  expect((await (await request.post("/__test__/metrics")).json()).sends).toHaveLength(1);
+  await keyboardTop(page, 0); await input.blur(); await page.locator(".session-header .title").click();
+  await expect(root).toHaveAttribute("data-input-layout", "bottom");
+  await page.goto("/settings"); await page.getByText("输入框仍被键盘遮挡？", { exact: true }).click();
+  await page.getByRole("button", { name: "复制布局诊断" }).click();
+  const diagnostic = JSON.parse(await page.getByRole("textbox", { name: "布局诊断信息" }).inputValue());
+  expect(diagnostic.samples.some((sample: { inputLayout: string; keyboardHeight: number; fieldBottom: number }) => sample.inputLayout === "auto-top" && sample.keyboardHeight === 0 && sample.fieldBottom < 350)).toBe(true);
+});
+
 test("小米桌面入口报告 browser 模式时仍启用键盘 API，输入框紧跟遮挡边界并在关闭后恢复", async ({ page }) => {
   await installedKeyboard(page, false); await page.goto("/old1");
   await page.getByRole("button", { name: "接管此会话" }).click();
@@ -67,6 +99,7 @@ test("小米桌面入口报告 browser 模式时仍启用键盘 API，输入框�
   expect(await page.evaluate(() => matchMedia("(display-mode: standalone)").matches)).toBe(false);
   expect(await page.evaluate(() => (navigator as unknown as { virtualKeyboard: { overlaysContent: boolean } }).virtualKeyboard.overlaysContent)).toBe(true);
   await keyboardTop(page, 420); await aboveKeyboard(page, 420);
+  await expect(page.locator(".session-page")).toHaveAttribute("data-input-layout", "bottom");
   expect(await page.evaluate(() => visualViewport!.height)).toBe(initialHeight);
   await expect.poll(() => page.locator(".session-page").evaluate((element) => element.getBoundingClientRect().bottom)).toBe(420);
   await expect(input).toBeFocused(); await expect(input).toHaveValue("桌面快捷入口草稿");
