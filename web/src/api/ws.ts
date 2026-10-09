@@ -52,8 +52,11 @@ export class WsClient {
   disconnect(): void {
     this.shouldConnect = false;
     this.stopHeartbeat();
-    this.socket?.close();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    const socket = this.socket;
     this.socket = null;
+    socket?.close();
     this.setState("idle");
   }
 
@@ -63,6 +66,7 @@ export class WsClient {
     const socket = this.socketFactory(this.url());
     this.socket = socket;
     socket.onopen = () => {
+      if (this.socket !== socket) return;
       this.backoffMs = 1000;
       this.setState("open");
       this.startHeartbeat();
@@ -73,6 +77,7 @@ export class WsClient {
       if (this.listSinks.size > 0) this.rawSend({ type: "subscribeList" });
     };
     socket.onclose = () => {
+      if (this.socket !== socket) return;
       this.socket = null;
       this.stopHeartbeat();
       this.setState("closed");
@@ -81,7 +86,7 @@ export class WsClient {
         this.backoffMs = Math.min(this.backoffMs * 2, 15000);
       }
     };
-    socket.onmessage = (ev) => this.handleMessage(ev.data);
+    socket.onmessage = (ev) => { if (this.socket === socket) this.handleMessage(ev.data); };
   }
 
   private setState(s: WsState): void {

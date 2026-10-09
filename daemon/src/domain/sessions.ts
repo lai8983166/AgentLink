@@ -287,6 +287,7 @@ export class SessionRegistry {
       cwd: abs,
       agent: "codex",
       status: "running",
+      statusUpdatedAt: Date.now(),
       activeElsewhere: false,
       activeVia: null,
       forkedFromId: null,
@@ -329,7 +330,7 @@ export class SessionRegistry {
     // 否则列表接口与列表推送会被撑到 MB 级（外网下首页 15s 轮询灾难）
     const { history, tokenUsage, ...summaryBase } = session;
     this.live.set(id, {
-      summary: { ...summaryBase, status: "idle", approvalPolicy: desired, pendingApprovals: 0 },
+      summary: { ...summaryBase, status: "idle", statusUpdatedAt: Date.now(), approvalPolicy: desired, pendingApprovals: 0 },
       history,
       tokenUsage: tokenUsage ?? null,
       desiredPolicy: desired,
@@ -397,6 +398,7 @@ export class SessionRegistry {
         cwd,
         agent: "codex",
         status: "idle",
+        statusUpdatedAt: Date.now(),
         activeElsewhere: false,
         activeVia: null,
         forkedFromId: id,
@@ -674,6 +676,7 @@ export class SessionRegistry {
   }
 
   private publishUpdated(s: LiveSession): void {
+    s.summary.statusUpdatedAt = Math.max(Date.now(), (s.summary.statusUpdatedAt ?? 0) + 1);
     this.bus.publishList({ type: "session.updated", summary: { ...s.summary } });
   }
 }

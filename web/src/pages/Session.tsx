@@ -82,9 +82,6 @@ export function Session() {
 
   // WS 订阅：事件驱动更新
   useEffect(() => {
-    ws.onSnapshotRequired = (sid) => {
-      if (sid === sessionId) queryClient.invalidateQueries({ queryKey: ["session", sid] });
-    };
     return ws.subscribe(sessionId, (e: SessionEvent) => applyEvent(e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, queryClient]);
