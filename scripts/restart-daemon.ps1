@@ -1,4 +1,4 @@
-param([switch]$Execute)
+﻿param([switch]$Execute)
 $ErrorActionPreference = 'Stop'
 # 默认只核验；任何核验失败均拒绝结束进程。没有 force 选项。
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
