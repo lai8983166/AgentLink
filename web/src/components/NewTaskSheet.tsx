@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ApprovalPolicy, FsEntry } from "@agentlink/shared";
 import { api } from "../runtime";
+import { useVisibleViewport } from "../visible-viewport";
 
 /** 新任务 Sheet（任务 7.6）：项目选择 + 策略三档 + 描述 */
 const POLICY: Array<{ key: ApprovalPolicy; label: string }> = [
@@ -12,6 +13,14 @@ const POLICY: Array<{ key: ApprovalPolicy; label: string }> = [
 ];
 
 export function NewTaskSheet({ onClose }: { onClose: () => void }) {
+  const viewportStyle = useVisibleViewport();
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement && sheetRef.current?.contains(active)) {
+      active.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [viewportStyle.height, viewportStyle.top]);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [path, setPath] = useState("");
@@ -43,8 +52,7 @@ export function NewTaskSheet({ onClose }: { onClose: () => void }) {
   return (
     <div
       style={{
-        position: "fixed",
-        inset: 0,
+        ...viewportStyle,
         zIndex: 50,
         background: "rgba(48,38,12,.5)",
         display: "flex",
@@ -53,11 +61,12 @@ export function NewTaskSheet({ onClose }: { onClose: () => void }) {
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
+        ref={sheetRef}
         style={{
           background: "#fffdf6",
           borderTop: "2px solid var(--border)",
           borderRadius: "22px 22px 0 0",
-          padding: "8px 18px 30px",
+          padding: "8px 18px max(30px, env(safe-area-inset-bottom))",
           maxHeight: "82%",
           overflowY: "auto",
           width: "100%",
@@ -153,6 +162,7 @@ export function NewTaskSheet({ onClose }: { onClose: () => void }) {
 
         <div className="section-label">任务描述</div>
         <textarea
+          aria-label="任务描述"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="描述你想让它做的事，可粘贴报错、需求…"
@@ -163,7 +173,7 @@ export function NewTaskSheet({ onClose }: { onClose: () => void }) {
             border: "1.5px solid var(--border)",
             borderRadius: 13,
             padding: 12,
-            fontSize: 14,
+            fontSize: 16,
             outline: "none",
             fontFamily: "var(--sans)",
             resize: "none",
