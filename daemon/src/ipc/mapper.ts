@@ -12,6 +12,7 @@ import type {
 
 export interface DesktopTurnItemState {
   key: string;
+  clientMessageId?: string;
   type: string;
   status: string | null;
   text: string;
@@ -47,7 +48,7 @@ export interface DesktopState {
 /** 差分产出的事件（无 seq/at，由总线补齐） */
 export type DesktopFact =
   | { kind: "session.status"; status: "running" | "waiting_approval" | "done" | "error" | "idle" | "unknown"; activity: string | null }
-  | { kind: "user.message"; itemId: string; text: string }
+  | { kind: "user.message"; itemId: string; text: string; clientMessageId?: string }
   | { kind: "agent.message"; itemId: string; text: string }
   | { kind: "agent.delta"; itemId: string; delta: string }
   | { kind: "tool.started"; itemId: string; toolKind: "exec" | "fileChange"; target: string; cmd: string | null }
@@ -254,13 +255,30 @@ function normalizeRequest(r: IpcPendingRequest): DesktopRequestState | null {
 
 export function normalizeSnapshot(cs: ConversationState): DesktopState {
   const entities = cs.turnHistory?.history?.entitiesByKey ?? {};
-  const turns: DesktopTurnState[] = Object.entries(entities).map(([key, t]) => ({
+  const keys = new Set<string>();
+  for (const island of cs.turnHistory?.history?.islands ?? []) {
+    for (const entry of island.entries ?? []) {
+      const key = entry.value && Object.hasOwn(entities, entry.value) ? entry.value : entry.key;
+      if (key && Object.hasOwn(entities, key)) keys.add(key);
+    }
+  }
+  // 兼容旧快照及尚未加入顺序表的本地轮次，不能遗漏实体。
+  for (const key of Object.keys(entities)) keys.add(key);
+  const turns: DesktopTurnState[] = [...keys].map((key) => {
+    const t = entities[key]!;
+    const userIndex = (t.items ?? []).findIndex((it) => it.type === "userMessage");
+    const clientMessageId = str(t.params?.clientUserMessageId);
+    return ({
     turnId: str(t.turnId) ?? key,
     status: str(t.status) ?? "unknown",
     items: (t.items ?? [])
-      .map((it, idx) => normalizeItem(str(t.turnId) ?? key, idx, it))
+      .map((it, idx) => {
+        const item = normalizeItem(str(t.turnId) ?? key, idx, it);
+        return item && idx === userIndex && clientMessageId ? { ...item, clientMessageId } : item;
+      })
       .filter((x): x is DesktopTurnItemState => x !== null),
-  }));
+    });
+  });
   const requests = (cs.requests ?? [])
     .map(normalizeRequest)
     .filter((x): x is DesktopRequestState => x !== null);
@@ -303,7 +321,8 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
 
       if (item.type === "userMessage") {
         if (isNew && item.text) {
-          facts.push({ kind: "user.message", itemId: item.key, text: item.text });
+          facts.push({ kind: "user.message", itemId: item.key, text: item.text,
+            ...(item.clientMessageId ? { clientMessageId: item.clientMessageId } : {}) });
           seenItemKeys.add(item.key);
         }
         continue;
@@ -375,6 +394,10 @@ export function diffDesktopState(prev: DesktopState | null, next: DesktopState):
   }
 
   // 状态（放在末尾，保证 UI 先看到内容再看状态）
+  const previousOrder = (prev?.turns ?? []).flatMap((t) => t.items.map((i) => i.key));
+  const nextOrder = next.turns.flatMap((t) => t.items.map((i) => i.key));
+  // 迟到条目插在已有回复前时，事件到达顺序不能代表对话顺序。
+  if (!previousOrder.every((key, index) => nextOrder[index] === key)) facts.push({ kind: "history.sync" });
   facts.push(desktopStatusFact(next));
   return facts;
 }

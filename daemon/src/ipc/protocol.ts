@@ -79,6 +79,8 @@ export interface ConversationState {
   latestThreadSettings?: { approvalPolicy?: string } | null;
   turnHistory?: {
     history?: {
+      /** 桌面历史的显示顺序；实体对象的插入顺序不保证是轮次顺序。 */
+      islands?: Array<{ entries?: Array<{ key?: string; value?: string }> }>;
       entitiesByKey?: Record<
         string,
         {

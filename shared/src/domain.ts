@@ -116,6 +116,7 @@ export const HistoryItem = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("userMessage"),
     id: z.string(),
+    clientMessageId: z.string().optional(),
     text: z.string(),
     at: z.number(),
   }),
