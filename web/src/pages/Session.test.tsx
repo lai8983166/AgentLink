@@ -74,6 +74,20 @@ describe("原会话连接不会回落到独立 resume", () => {
     expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("未发送的草稿");
     expect(api.sendMessage).not.toHaveBeenCalled();
   });
+
+  test("流式片段已显示但最终事件丢失时，HTTP 完整回复替换缓冲而不重复", async () => {
+    vi.useFakeTimers(); useStore.setState({ wsConnected: true });
+    const initial = session({ desktopManaged: false, activeElsewhere: false, status: "running" });
+    vi.mocked(api.sessionDetail).mockResolvedValue({ session: initial, latestSeq: 0 });
+    mount(initial); await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    act(() => stream.sink?.({ type: "agent.delta", sessionId: initial.id, seq: 1, at: 1, itemId: "model", delta: "已显示的片段" }));
+    expect(screen.getByText("已显示的片段")).toBeTruthy();
+    vi.mocked(api.sessionDetail).mockResolvedValue({ session: { ...initial, history: [{ type: "agentMessage", id: "model", text: "已显示的片段及完整回复", at: 2 }] }, latestSeq: 2 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10001); });
+    expect(screen.getByText("已显示的片段及完整回复")).toBeTruthy();
+    expect(screen.queryByText("已显示的片段", { exact: true })).toBeNull();
+    expect(screen.getByTestId("conversation-history").querySelectorAll('[data-message-type="agent"]')).toHaveLength(1);
+  });
   test("旧版三条已接收记录不再追加到聊天底部，展开与清除仅影响本地提示", async () => {
     localStorage.setItem("agentlink-messages:desktop-1", JSON.stringify([1, 2, 3].map((n) => ({
       id: "legacy-" + n, text: "继续推进", at: n, state: "accepted", afterId: "trimmed-anchor", knownUserIds: [],
