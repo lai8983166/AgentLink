@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { SessionDetail, SessionEvent } from "@agentlink/shared";
 import { Session } from "./Session";
 import { api } from "../runtime";
+import { useStore } from "../store";
 
 const stream = vi.hoisted(() => ({ sink: null as ((e: SessionEvent) => void) | null }));
 
@@ -43,10 +44,36 @@ function mount(initial: SessionDetail) {
   return client;
 }
 
-beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); vi.mocked(api.sessionDetail).mockImplementation(() => new Promise(() => {})); });
-afterEach(cleanup);
+beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); useStore.setState({ wsConnected: false }); vi.mocked(api.sessionDetail).mockImplementation(() => new Promise(() => {})); });
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("原会话连接不会回落到独立 resume", () => {
+  test.each([false, true])("实时连接状态为 %s 且没有事件时，前台仍自动取得模型输出", async (connected) => {
+    vi.useFakeTimers(); useStore.setState({ wsConnected: connected });
+    const initial = session({ desktopManaged: true, controlMode: "takeover", status: "running" });
+    vi.mocked(api.sessionDetail).mockResolvedValue({ session: initial, latestSeq: 0 });
+    mount(initial);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    vi.mocked(api.sessionDetail).mockResolvedValue({ session: { ...initial, history: [{ type: "agentMessage", id: "recovered", text: "HTTP 恢复的完整输出", at: 1 }] }, latestSeq: 2 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(connected ? 10000 : 5000); });
+    expect(screen.getByText("HTTP 恢复的完整输出")).toBeTruthy();
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test("HTTP 核对失败显示旧内容与重试入口，手动刷新恢复输出并保留草稿", async () => {
+    const initial = session({ desktopManaged: true, controlMode: "takeover", status: "running", history: [{ type: "agentMessage", id: "old", text: "上次内容", at: 1 }] });
+    vi.mocked(api.sessionDetail).mockRejectedValueOnce(new Error("network"));
+    mount(initial);
+    expect(await screen.findByText(/输出同步失败/)).toBeTruthy();
+    expect(screen.getByText("上次内容")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "未发送的草稿" } });
+    vi.mocked(api.sessionDetail).mockResolvedValue({ session: { ...initial, history: [{ type: "agentMessage", id: "new", text: "刷新后的输出", at: 2 }] }, latestSeq: 3 });
+    fireEvent.click(screen.getByRole("button", { name: "刷新输出" }));
+    expect(await screen.findByText("刷新后的输出")).toBeTruthy();
+    expect(screen.queryByText(/输出同步失败/)).toBeNull();
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("未发送的草稿");
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
   test("旧版三条已接收记录不再追加到聊天底部，展开与清除仅影响本地提示", async () => {
     localStorage.setItem("agentlink-messages:desktop-1", JSON.stringify([1, 2, 3].map((n) => ({
       id: "legacy-" + n, text: "继续推进", at: n, state: "accepted", afterId: "trimmed-anchor", knownUserIds: [],

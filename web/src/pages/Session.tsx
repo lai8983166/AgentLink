@@ -62,6 +62,10 @@ function SessionView() {
       return result;
     },
     refetchOnMount: "always",
+    // HTTP 接收回执和 WS 输出是两条链路；外网实时连接失效时仍核对权威历史。
+    // React Query 默认在后台暂停轮询，并合并同一查询的在途请求。
+    refetchInterval: (query) => !wsConnected ? 5000 :
+      ["running", "waiting_approval", "unknown"].includes(query.state.data?.session.status ?? "unknown") ? 10000 : 30000,
   });
   const takenOver = detailQ.data?.session.controlMode === "takeover" ||
     (detailQ.data?.session.controlMode === undefined && takenOverId === sessionId);
@@ -321,10 +325,15 @@ function SessionView() {
 
       {/* 动作条：当前动作常显 */}
       <div style={{ padding: "4px 16px", fontSize: 11, color: "var(--text-dim)" }}>
-        {wsConnected ? "手机与后台已连接" : "手机与后台连接中"}
+        {wsConnected ? "手机与后台已连接" : "实时连接中 · 定时核对输出"}
         {session?.desktopManaged && ` · ${session.desktopGone ? "电脑端未连接" : status === "unknown" ? "会话状态待确认" : takenOver ? "原会话可控制" : "原会话观察中"}`}
-        {session?.statusUpdatedAt ? ` · 同步于 ${new Date(session.statusUpdatedAt).toLocaleTimeString()}` : ""}
+        {detailQ.dataUpdatedAt ? ` · 内容更新于 ${new Date(detailQ.dataUpdatedAt).toLocaleTimeString()}` : ""}
+        <button className="btn ghost" style={{ marginLeft: 8, padding: "3px 7px", fontSize: 11 }}
+          disabled={detailQ.isFetching} onClick={() => void detailQ.refetch()}>刷新输出</button>
       </div>
+      {detailQ.isError && <div role="status" style={{ padding: "6px 16px", fontSize: 12, color: "var(--red)" }}>
+        输出同步失败，正在重试；当前显示上次收到的内容。可点击“刷新输出”重新核对。
+      </div>}
       <div
         style={{
           display: "flex",

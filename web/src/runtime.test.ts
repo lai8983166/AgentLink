@@ -28,4 +28,12 @@ describe("手机恢复时主动刷新权威状态", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     expect(ws.probe).toHaveBeenCalledTimes(1);
   });
+
+  test("切换网络恢复联网立即核对输出，清理后不再刷新", () => {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const cleanup = connectWs(); window.dispatchEvent(new Event("online"));
+    expect(ws.probe).toHaveBeenCalledTimes(1);
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["session"] });
+    cleanup(); window.dispatchEvent(new Event("online")); expect(ws.probe).toHaveBeenCalledTimes(1);
+  });
 });

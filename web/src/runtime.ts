@@ -31,12 +31,12 @@ export function connectWs(): () => void {
       refresh();
     }
   };
-  ws.connect();
   ws.onSnapshotRequired = async (sid) => {
     await queryClient.cancelQueries({ queryKey: ["session", sid] });
     const snapshot = await queryClient.fetchQuery({ queryKey: ["session", sid], queryFn: () => api.sessionDetail(sid), staleTime: 0 });
     return { latestSeq: snapshot.latestSeq, serverEpoch: snapshot.serverEpoch };
   };
+  ws.connect();
   // 后台恢复（解锁手机回到 PWA）：立即探测假死连接，不等下一跳心跳
   const onVisible = () => {
     if (document.visibilityState !== "visible") return;
@@ -44,8 +44,10 @@ export function connectWs(): () => void {
     refresh();
   };
   document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("online", onVisible);
   return () => {
     document.removeEventListener("visibilitychange", onVisible);
+    window.removeEventListener("online", onVisible);
     ws.disconnect();
   };
 }

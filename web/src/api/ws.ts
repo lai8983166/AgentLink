@@ -10,6 +10,7 @@ export type WsState = "idle" | "connecting" | "open" | "closed";
 /** 心跳参数：20s 一跳，45s 无 pong 判假死（WiFi/移动网络闪断时 onclose 不触发） */
 const PING_INTERVAL_MS = 20_000;
 const PONG_STALE_MS = 45_000;
+const CONNECT_TIMEOUT_MS = 12_000;
 
 export interface FakeableSocket {
   send(data: string): void;
@@ -39,6 +40,7 @@ export class WsClient {
   private shouldConnect = false;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private lastPongAt = 0;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly url: () => string,
@@ -55,6 +57,7 @@ export class WsClient {
     this.shouldConnect = false;
     this.cancelRecoveries();
     this.stopHeartbeat();
+    this.clearConnectTimer();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     const socket = this.socket;
@@ -66,10 +69,14 @@ export class WsClient {
   private open(): void {
     if (this.socket) return;
     this.setState("connecting");
-    const socket = this.socketFactory(this.url());
+    let socket: FakeableSocket;
+    try { socket = this.socketFactory(this.url()); }
+    catch { this.scheduleReconnect(); return; }
     this.socket = socket;
+    this.connectTimer = setTimeout(() => this.retireSocket(socket), CONNECT_TIMEOUT_MS);
     socket.onopen = () => {
       if (this.socket !== socket) return;
+      this.clearConnectTimer();
       this.backoffMs = 1000;
       this.setState("open");
       this.startHeartbeat();
@@ -81,16 +88,32 @@ export class WsClient {
     };
     socket.onclose = () => {
       if (this.socket !== socket) return;
-      this.cancelRecoveries();
-      this.socket = null;
-      this.stopHeartbeat();
-      this.setState("closed");
-      if (this.shouldConnect) {
-        this.reconnectTimer = setTimeout(() => this.open(), this.backoffMs);
-        this.backoffMs = Math.min(this.backoffMs * 2, 15000);
-      }
+      this.retireSocket(socket);
     };
     socket.onmessage = (ev) => { if (this.socket === socket) this.handleMessage(ev.data); };
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer) clearTimeout(this.connectTimer);
+    this.connectTimer = null;
+  }
+
+  /** 不能等待原生 close 事件：移动网络可能让握手或关闭握手一直悬挂。 */
+  private retireSocket(socket: FakeableSocket): void {
+    if (this.socket !== socket) return;
+    this.socket = null;
+    this.cancelRecoveries();
+    this.clearConnectTimer();
+    this.stopHeartbeat();
+    try { socket.close(); } catch { /* 已退役，旧回调会被忽略 */ }
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    this.setState("closed");
+    if (!this.shouldConnect || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.open(); }, this.backoffMs);
+    this.backoffMs = Math.min(this.backoffMs * 2, 15000);
   }
 
   private setState(s: WsState): void {
@@ -105,7 +128,7 @@ export class WsClient {
     this.lastPongAt = Date.now();
     this.pingTimer = setInterval(() => {
       if (Date.now() - this.lastPongAt > PONG_STALE_MS) {
-        this.socket?.close();
+        if (this.socket) this.retireSocket(this.socket);
         return;
       }
       this.rawSend({ type: "ping" });
@@ -120,7 +143,7 @@ export class WsClient {
   /** 立即检查连接活性（页面从后台恢复时调用，免去等下一跳） */
   probe(): void {
     if (this.state === "open" && Date.now() - this.lastPongAt > PONG_STALE_MS) {
-      this.socket?.close();
+      if (this.socket) this.retireSocket(this.socket);
     }
   }
 
@@ -128,7 +151,7 @@ export class WsClient {
     try {
       this.socket?.send(JSON.stringify(m));
     } catch {
-      /* 连接断开时的发送由重连补发兜底 */
+      if (this.socket) this.retireSocket(this.socket);
     }
   }
 
@@ -187,6 +210,12 @@ export class WsClient {
         if (e.serverEpoch && epoch && e.serverEpoch !== epoch) return;
         if (e.serverEpoch) this.epochs.set(e.sessionId, e.serverEpoch);
         if (e.seq <= (this.lastSeq.get(e.sessionId) ?? 0)) return;
+        if (this.recoveries.has(e.sessionId)) return;
+        const previous = this.lastSeq.get(e.sessionId);
+        if (previous !== undefined && e.seq > previous + 1) {
+          this.recoverSnapshot(e.sessionId, e.serverEpoch);
+          return;
+        }
         // 更新序号水位
         if (e.seq > (this.lastSeq.get(e.sessionId) ?? 0)) this.lastSeq.set(e.sessionId, e.seq);
         const sinks = this.sessionSinks.get(e.sessionId);

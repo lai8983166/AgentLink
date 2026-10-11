@@ -61,7 +61,7 @@ export class ApiClient {
     return this.request<SessionListResponse>("/api/v1/sessions");
   }
   sessionDetail(id: string) {
-    return this.request<SessionDetailResponse>(`/api/v1/sessions/${id}`);
+    return this.request<SessionDetailResponse>(`/api/v1/sessions/${id}`, { cache: "no-store" });
   }
   resume(id: string) {
     return this.request<SessionDetailResponse>(`/api/v1/sessions/${id}/resume`, { method: "POST" });

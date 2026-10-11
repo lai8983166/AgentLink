@@ -35,6 +35,41 @@ function setup() {
 }
 
 describe("WsClient（任务 7.2）", () => {
+  test("外网握手不返回且 close 也不回调时仍超时重连，旧连接不能复活", async () => {
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient(() => "ws://x", () => {
+      const socket = new FakeSocket(); socket.close = () => {}; sockets.push(socket); return socket;
+    });
+    const seen = vi.fn(); client.subscribe("s1", seen); client.connect();
+    await vi.advanceTimersByTimeAsync(13000);
+    expect(sockets).toHaveLength(2);
+    sockets[0]!.onopen?.(); expect(client.state).toBe("connecting");
+    sockets[1]!.onopen?.(); expect(client.state).toBe("open");
+    sockets[0]!.serverSend({ type: "event", event: { sessionId: "s1", seq: 1 } });
+    expect(seen).not.toHaveBeenCalled();
+    client.disconnect(); await vi.advanceTimersByTimeAsync(30000); expect(sockets).toHaveLength(2);
+  });
+  test("假死连接关闭握手悬挂也能重连并恢复订阅", async () => {
+    const { client, sockets } = setup(); client.subscribe("s1", () => {});
+    sockets[0]!.close = () => {};
+    await vi.advanceTimersByTimeAsync(61000);
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.onopen?.(); expect(client.state).toBe("open");
+    expect(sockets[1]!.sent.map((s) => JSON.parse(s))).toContainEqual({ type: "subscribe", sessionId: "s1", lastSeq: null });
+    client.disconnect();
+  });
+  test("有 pong 但事件缺号时不继续应用残缺增量，快照重建后恢复完整输出", async () => {
+    const { client, sockets } = setup(); const seen = vi.fn(); client.subscribe("s1", seen);
+    let complete!: (snapshot: { latestSeq: number; serverEpoch: string }) => void;
+    client.onSnapshotRequired = vi.fn(() => new Promise<{ latestSeq: number; serverEpoch: string }>((resolve) => { complete = resolve; }));
+    const event = (seq: number) => ({ type: "event", event: { sessionId: "s1", seq, serverEpoch: "same", type: "agent.delta", itemId: "m", delta: "part" } });
+    sockets[0]!.serverSend(event(1)); sockets[0]!.serverSend({ type: "pong" });
+    sockets[0]!.serverSend(event(3)); sockets[0]!.serverSend(event(4));
+    expect(client.onSnapshotRequired).toHaveBeenCalledTimes(1); expect(seen).toHaveBeenCalledTimes(1);
+    complete({ latestSeq: 4, serverEpoch: "same" }); await Promise.resolve();
+    expect(JSON.parse(sockets[0]!.sent.at(-1)!)).toEqual({ type: "subscribe", sessionId: "s1", lastSeq: 4, serverEpoch: "same" });
+    sockets[0]!.serverSend(event(5)); expect(seen).toHaveBeenCalledTimes(2); client.disconnect();
+  });
   test("快照临时失败会在当前连接重试，退订后取消重试", async () => {
     const { client, sockets } = setup();
     const unsubscribe = client.subscribe("s1", () => {});
