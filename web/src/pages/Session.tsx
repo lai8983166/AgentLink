@@ -206,6 +206,11 @@ function SessionView() {
   const [delta, setDelta] = useState<{ itemId: string; text: string } | null>(null);
 
   const session = detailQ.data?.session;
+  // 完成事件可能在外网丢失；HTTP 已取回同一条正式回复时撤销临时流式缓冲。
+  useEffect(() => {
+    setDelta((current) => current && session?.history.some((item) =>
+      item.type === "agentMessage" && item.id === current.itemId) ? null : current);
+  }, [session?.history]);
   const status = session?.status ?? liveStatus?.status ?? "unknown";
   const activity = liveStatus?.activity ?? null;
   const isDesktopBusy = !!session?.desktopManaged || (!!session?.activeElsewhere && !session?.desktopGone);
@@ -327,7 +332,7 @@ function SessionView() {
       <div style={{ padding: "4px 16px", fontSize: 11, color: "var(--text-dim)" }}>
         {wsConnected ? "手机与后台已连接" : "实时连接中 · 定时核对输出"}
         {session?.desktopManaged && ` · ${session.desktopGone ? "电脑端未连接" : status === "unknown" ? "会话状态待确认" : takenOver ? "原会话可控制" : "原会话观察中"}`}
-        {detailQ.dataUpdatedAt ? ` · 内容更新于 ${new Date(detailQ.dataUpdatedAt).toLocaleTimeString()}` : ""}
+        {detailQ.dataUpdatedAt ? ` · 内容核对于 ${new Date(detailQ.dataUpdatedAt).toLocaleTimeString()}` : ""}
         <button className="btn ghost" style={{ marginLeft: 8, padding: "3px 7px", fontSize: 11 }}
           disabled={detailQ.isFetching} onClick={() => void detailQ.refetch()}>刷新输出</button>
       </div>
