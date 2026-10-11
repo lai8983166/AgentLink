@@ -91,3 +91,36 @@ test("离线重连及后台重启后恢复接管、草稿和后续实时状态",
   await expect(page.getByText("已完成", { exact: true })).toBeVisible();
   await page.reload(); await expect(input).toHaveValue("保存的草稿");
 });
+
+test("已同步指令遇到历史裁剪和重开时不复活，旧版三条残留可核对和清除，草稿保留", async ({ page, request }) => {
+  await page.goto("/old1");
+  await page.getByRole("button", { name: "接管此会话" }).click();
+  const input = page.getByRole("textbox");
+  await input.fill("继续推进"); await page.getByRole("button", { name: "↑", exact: true }).click();
+  await expect(input).toHaveValue("");
+  await expect(page.getByTestId("conversation-history").locator('[data-message-id^="server-"]')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("agentlink-messages:old1") ?? "[]").length)).toBe(0);
+  await request.post("/__test__/control", { data: { type: "trimHistory" } });
+  await expect(page.getByText("裁剪后的最新回复", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("conversation-history").locator('[data-message-type="user"]')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId("conversation-history").locator('[data-message-type="user"]')).toHaveCount(0);
+  await expect(page.getByText(/等待同步/)).toHaveCount(0);
+  await page.evaluate(() => localStorage.setItem("agentlink-messages:old1", JSON.stringify([1, 2, 3].map((n) => ({
+    id: "legacy-" + n, text: "继续推进", at: Date.now() - n * 60000, state: "accepted", afterId: "old-trimmed-anchor", knownUserIds: [],
+  })))));
+  await input.fill("保留这份草稿");
+  await page.reload();
+  const records = page.getByTestId("older-deliveries");
+  await expect(records).toContainText("已接收的旧发送记录（3）");
+  await expect(page.getByTestId("conversation-history").locator('[data-message-type="user"]')).toHaveCount(0);
+  await expect(page.getByText(/等待同步/)).toHaveCount(0);
+  await records.locator("summary").click();
+  await expect(records.getByText("继续推进", { exact: true })).toHaveCount(3);
+  if (test.info().project.name === "mobile") await page.screenshot({ path: test.info().outputPath("older-deliveries.png") });
+  await records.getByRole("button", { name: "清除这些本地提示" }).click();
+  await expect(records).toHaveCount(0);
+  await expect(input).toHaveValue("保留这份草稿");
+  await page.reload(); await expect(records).toHaveCount(0); await expect(input).toHaveValue("保留这份草稿");
+  expect((await (await request.post("/__test__/metrics")).json()).sends).toHaveLength(1);
+});
