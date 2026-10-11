@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./runtime";
 import type { HistoryItem } from "@agentlink/shared";
 import type { DeliveryState, OutgoingMessage } from "./message-history";
+import { reconcileOutgoingHistory } from "./message-history";
 
 type Outbox = { text: string; id: string | null; state: "draft" | "sending" | "accepted" | "failed" | "uncertain" };
 const empty = (): Outbox => ({ text: "", id: null, state: "draft" });
@@ -36,6 +37,17 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(outbox.state === "uncertain" ? "上次发送结果待确认，请核对发送结果" : null);
   const busy = useRef(false);
+  function saveMessages(next: OutgoingMessage[]) {
+    messagesRef.current = next; setMessages(next);
+    try { localStorage.setItem(messagesKey, JSON.stringify(next)); } catch { /* 保留内存记录 */ }
+  }
+  // 一旦权威历史确认了发送记录，就删除本地占位，防止历史裁剪后重新冒出来。
+  useEffect(() => {
+    const current = messagesRef.current;
+    const confirmed = new Set(reconcileOutgoingHistory(options.history?.() ?? [], current).confirmedIds);
+    const next = current.filter((message) => message.state !== "accepted" || !confirmed.has(message.id));
+    if (next.length !== current.length) saveMessages(next);
+  }, [messages, options.history]);
   function save(next: Outbox) {
     setOutbox(next);
     try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* 存储不可用时保留内存中的草稿 */ }
@@ -49,8 +61,7 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
     }
     const disposable = next.filter((m) => m.state === "accepted" || m.state === "failed").slice(-100);
     next = next.filter((m) => m.state === "sending" || m.state === "uncertain" || disposable.includes(m));
-    messagesRef.current = next; setMessages(next);
-    try { localStorage.setItem(messagesKey, JSON.stringify(next)); } catch { /* 保留内存记录 */ }
+    saveMessages(next);
   }
   function accepted(id: string) { record(id, "accepted"); save(empty()); setNotice("电脑端已接收"); options.onAccepted?.(); }
   async function recheck() {
@@ -89,5 +100,9 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
     } finally { busy.current = false; setSending(false); }
   }
   return { input: outbox.text, messages, sending, notice, uncertain: outbox.state === "uncertain", submit, recheck,
+    forgetAccepted: (ids: string[]) => {
+      const selected = new Set(ids);
+      saveMessages(messagesRef.current.filter((message) => message.state !== "accepted" || !selected.has(message.id)));
+    },
     setInput: (text: string) => save(text === outbox.text ? outbox : { text, id: null, state: "draft" }), };
 }

@@ -47,6 +47,20 @@ beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); vi.mocked(api.sessi
 afterEach(cleanup);
 
 describe("原会话连接不会回落到独立 resume", () => {
+  test("旧版三条已接收记录不再追加到聊天底部，展开与清除仅影响本地提示", async () => {
+    localStorage.setItem("agentlink-messages:desktop-1", JSON.stringify([1, 2, 3].map((n) => ({
+      id: "legacy-" + n, text: "继续推进", at: n, state: "accepted", afterId: "trimmed-anchor", knownUserIds: [],
+    }))));
+    mount(session({ desktopManaged: true, controlMode: "takeover", history: [{ type: "agentMessage", id: "recent", text: "最新回复", at: 4 }] }));
+    expect(screen.getByTestId("conversation-history").querySelectorAll('[data-message-type="user"]')).toHaveLength(0);
+    expect(screen.queryByText(/等待同步/)).toBeNull();
+    expect(screen.getByText("已接收的旧发送记录（3）")).toBeTruthy();
+    fireEvent.click(screen.getByText("已接收的旧发送记录（3）"));
+    fireEvent.click(screen.getByRole("button", { name: "清除这些本地提示" }));
+    await waitFor(() => expect(screen.queryByTestId("older-deliveries")).toBeNull());
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem("agentlink-messages:desktop-1")!)).toEqual([]);
+  });
   test("回执和桌面指令迟到时立即显示用户消息；模型先到也不乱序、不重复", async () => {
     let confirm!: (v: { ok: true }) => void;
     vi.mocked(api.sendMessage).mockReturnValueOnce(new Promise((resolve) => { confirm = resolve; }));

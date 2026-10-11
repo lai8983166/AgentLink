@@ -55,4 +55,32 @@ describe("手机指令草稿与回执", () => {
     expect(api.sendMessage).not.toHaveBeenCalled();
     expect(api.messageReceipt).toHaveBeenCalledWith("s1", "m1");
   });
+  test("权威历史匹配后删除本地占位，后续历史裁剪及重开都不能让旧记录再冒出来", async () => {
+    localStorage.setItem("agentlink-messages:s1", JSON.stringify([{ id: "m1", text: "继续", at: 1, state: "accepted", afterId: "old-anchor", knownUserIds: [] }]));
+    const { result, rerender, unmount } = renderHook(({ history }) => useMessageOutbox("s1", { history: () => history }), {
+      initialProps: { history: [{ type: "userMessage" as const, id: "server", clientMessageId: "m1", text: "继续", at: 1 }] },
+    });
+    expect(result.current.messages).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("agentlink-messages:s1")!)).toEqual([]);
+    rerender({ history: [] });
+    expect(result.current.messages).toEqual([]);
+    unmount();
+    expect(renderHook(() => useMessageOutbox("s1")).result.current.messages).toEqual([]);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+  test("旧锚点缺失不能冒充已同步；清除已接收的本地提示不影响草稿或未确认记录", () => {
+    localStorage.setItem("agentlink-outbox:s1", JSON.stringify({ text: "待确认草稿", id: "pending", state: "uncertain" }));
+    const records = [
+      { id: "old", text: "继续", at: 1, state: "accepted", afterId: "missing", knownUserIds: [] },
+      { id: "pending", text: "待确认草稿", at: 2, state: "uncertain", afterId: "missing", knownUserIds: [] },
+    ];
+    localStorage.setItem("agentlink-messages:s1", JSON.stringify(records));
+    const { result } = renderHook(() => useMessageOutbox("s1", { history: () => [{ id: "reply", type: "agentMessage", text: "新回复", at: 2 }] }));
+    expect(result.current.messages).toHaveLength(2);
+    act(() => result.current.forgetAccepted(["old", "pending"]));
+    expect(result.current.messages.map((m) => m.id)).toEqual(["pending"]);
+    expect(result.current.input).toBe("待确认草稿");
+    expect(result.current.uncertain).toBe(true);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
 });

@@ -10,7 +10,8 @@ import { MarkdownLite } from "../components/Markdown";
 import { DesktopBanner } from "../components/DesktopBanner";
 import { applySessionEvent, mergeSessionDetail, mergeResumedDetail } from "../session-state";
 import { useMessageOutbox } from "../message-outbox";
-import { mergeOutgoingHistory } from "../message-history";
+import { reconcileOutgoingHistory } from "../message-history";
+import { OlderDeliveries } from "../components/OlderDeliveries";
 import { useKeyboardViewport } from "../visible-viewport";
 import { UpdateNotice } from "../components/UpdateNotice";
 
@@ -38,7 +39,7 @@ function SessionView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
   const [queue, setQueue] = useState(0);
-  const { input, setInput, messages, sending, notice, uncertain, submit, recheck } = useMessageOutbox(sessionId, {
+  const { input, setInput, messages, sending, notice, uncertain, submit, recheck, forgetAccepted } = useMessageOutbox(sessionId, {
     history: () => queryClient.getQueryData<SessionDetailResponse>(["session", sessionId])?.session.history ?? [],
     onAccepted: () => { queryClient.invalidateQueries({ queryKey: ["session", sessionId] }); },
   });
@@ -236,7 +237,7 @@ function SessionView() {
     if (canDrive && !sending) await submit();
   }
 
-  const history = useMemo(() => mergeOutgoingHistory(session?.history ?? [], messages), [session?.history, messages]);
+  const { history, archived } = useMemo(() => reconcileOutgoingHistory(session?.history ?? [], messages), [session?.history, messages]);
   const approvalList = [...approvals.entries()];
 
   return (
@@ -348,6 +349,7 @@ function SessionView() {
       {/* 对话流 */}
       <div className="conversation-area">
       <div className="content session-content" data-testid="conversation-history" ref={scrollRef} onScroll={onScroll}>
+        <OlderDeliveries messages={archived} onDismiss={forgetAccepted} />
         {history.map((h) => {
           if (h.type === "userMessage") {
             return (
