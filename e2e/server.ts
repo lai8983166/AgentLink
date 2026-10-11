@@ -114,6 +114,13 @@ async function build(reset: boolean) {
       if (turn) turn.items.push(item); else state.items.push(item);
       state.requests = []; state.status = "inProgress"; state.revision++; push();
     }
+    else if (action.type === "localOutput") {
+      if (action.complete) fake.notify("item/completed", { threadId: "old1", item: { type: "agentMessage", id: "local-model", text: "流式回复开头，完整结束" } });
+      else {
+        fake.notify("thread/status/changed", { threadId: "old1", status: { type: "active", activeFlags: [] } });
+        fake.notify("item/agentMessage/delta", { threadId: "old1", itemId: "local-model", delta: "流式回复开头" });
+      }
+    }
     else if (action.type === "trimHistory") {
       state.turns = []; state.items = [{ id: "recent-after-trim", type: "agentMessage", text: "裁剪后的最新回复", status: "completed" }];
       state.revision++; push();

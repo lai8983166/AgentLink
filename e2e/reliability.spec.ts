@@ -31,6 +31,25 @@ for (const blocked of [true, false]) {
   });
 }
 
+test("最终回复事件丢失后通过 HTTP 取回完整回复，临时流式片段不重复", async ({ page, request }) => {
+  await request.post("/__test__/control", { data: { type: "ownership", available: false } });
+  await page.routeWebSocket("**/api/v1/ws*", (socket) => {
+    const server = socket.connectToServer();
+    server.onMessage((message) => {
+      const frame = JSON.parse(message.toString());
+      if (frame.type !== "event" || frame.event.type !== "agent.message") socket.send(message);
+    });
+  });
+  await page.goto("/old1"); await page.getByRole("button", { name: "继续原会话", exact: true }).click();
+  await expect(page.getByRole("textbox")).toBeEnabled();
+  await request.post("/__test__/control", { data: { type: "localOutput" } });
+  await expect(page.getByText("流式回复开头", { exact: true })).toBeVisible();
+  await request.post("/__test__/control", { data: { type: "localOutput", complete: true } });
+  await expect(page.getByText("流式回复开头，完整结束", { exact: true })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText("流式回复开头", { exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-message-id="local-model"]')).toHaveCount(1);
+});
+
 test("回执和用户消息迟到、模型先到：发送立即显示、顺序稳定且桌面同步后不重复", async ({ page, request }) => {
   await request.post("/__test__/control", { data: { type: "delayMessages" } });
   await page.goto("/old1"); await page.getByRole("button", { name: "接管此会话" }).click();
