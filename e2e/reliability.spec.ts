@@ -5,6 +5,32 @@ test.beforeEach(async ({ page, request }) => {
   await page.addInitScript(() => localStorage.setItem("agentlink-token", "isolated-e2e-token"));
 });
 
+for (const blocked of [true, false]) {
+  test(`${blocked ? "实时通道完全不可用" : "连接在线但输出事件丢失"}：接收成功后自动核对完整输出，不重发且草稿保留`, async ({ page, request }) => {
+    await page.routeWebSocket("**/api/v1/ws*", (socket) => {
+      if (blocked) { void socket.close(); return; }
+      const server = socket.connectToServer();
+      server.onMessage((message) => {
+        const frame = JSON.parse(message.toString());
+        if (frame.type !== "event") socket.send(message); // 保留订阅回执、pong，丢弃会话增量。
+      });
+    });
+    await page.goto("/old1"); await page.getByRole("button", { name: "接管此会话" }).click();
+    const input = page.getByRole("textbox");
+    await input.fill("外网发送测试"); await page.getByRole("button", { name: "↑", exact: true }).click();
+    await expect(input).toHaveValue("");
+    await expect(page.getByText("电脑端已接收", { exact: true })).toBeVisible();
+    await input.fill("保留外网草稿");
+    await request.post("/__test__/control", { data: { type: "output", text: "外网核对取回的完整模型输出" } });
+    await expect(page.getByText("外网核对取回的完整模型输出", { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("运行中", { exact: true })).toBeVisible();
+    await expect(input).toHaveValue("保留外网草稿");
+    await expect(page.getByTestId("conversation-history").locator('[data-message-type="user"]')).toHaveCount(1);
+    expect((await (await request.post("/__test__/metrics")).json()).sends).toHaveLength(1);
+    if (blocked && test.info().project.name === "mobile") await page.screenshot({ path: test.info().outputPath("http-output-recovery.png") });
+  });
+}
+
 test("回执和用户消息迟到、模型先到：发送立即显示、顺序稳定且桌面同步后不重复", async ({ page, request }) => {
   await request.post("/__test__/control", { data: { type: "delayMessages" } });
   await page.goto("/old1"); await page.getByRole("button", { name: "接管此会话" }).click();
