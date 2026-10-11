@@ -108,6 +108,12 @@ async function build(reset: boolean) {
     else if (action.type === "fileApproval") { state.requests = [commandRequest(3, "fileChange")]; state.revision++; push(); }
     else if (action.type === "done") { state.status = "completed"; state.requests = []; state.revision++; push(); }
     else if (action.type === "delayMessages") state.delayedMessages = true;
+    else if (action.type === "output") {
+      const item = { id: "external-output", type: "agentMessage", text: action.text, status: "completed" };
+      const turn = state.turns.at(-1);
+      if (turn) turn.items.push(item); else state.items.push(item);
+      state.requests = []; state.status = "inProgress"; state.revision++; push();
+    }
     else if (action.type === "trimHistory") {
       state.turns = []; state.items = [{ id: "recent-after-trim", type: "agentMessage", text: "裁剪后的最新回复", status: "completed" }];
       state.revision++; push();
