@@ -7,6 +7,8 @@ describe("HTTP 请求不会无限等待", () => {
     vi.stubGlobal("fetch", fetcher);
     await new ApiClient("", () => "test").sessionDetail("s1");
     expect(fetcher).toHaveBeenCalledWith("/api/v1/sessions/s1", expect.objectContaining({ cache: "no-store" }));
+    await new ApiClient("", () => "test").messageReceipt("s1", "m1");
+    expect(fetcher).toHaveBeenCalledWith("/api/v1/sessions/s1/messages/m1", expect.objectContaining({ cache: "no-store" }));
   });
   test("网络不响应时超时报错，保留操作结果待核对的含义", async () => {
     vi.useFakeTimers();

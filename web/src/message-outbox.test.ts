@@ -3,9 +3,78 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { useMessageOutbox } from "./message-outbox";
 import { api } from "./runtime";
 vi.mock("./runtime", () => ({ api: { sendMessage: vi.fn(), messageReceipt: vi.fn() } }));
-beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
-afterEach(cleanup);
+beforeEach(() => { vi.mocked(api.sendMessage).mockReset(); vi.mocked(api.messageReceipt).mockReset(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 describe("手机指令草稿与回执", () => {
+  test("重开时原会话中同 ID 的消息自动解除待确认，不查询或重发旧指令", () => {
+    const pending = { id: "m1", text: "继续推进", state: "uncertain" };
+    localStorage.setItem("agentlink-outbox:s1", JSON.stringify(pending));
+    localStorage.setItem("agentlink-messages:s1", JSON.stringify([{ ...pending, at: 1, afterId: "old", knownUserIds: [] }]));
+    const { result } = renderHook(() => useMessageOutbox("s1", { history: () => [{ type: "userMessage", id: "native", clientMessageId: "m1", text: "继续推进\n", at: 2 }] }));
+    expect(result.current.uncertain).toBe(false);
+    expect(result.current.input).toBe("");
+    expect(result.current.messages).toEqual([]);
+    expect(api.messageReceipt).not.toHaveBeenCalled();
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+  test("自动核对临时失败后恢复联网可以解除旧状态，查询不自动发送", async () => {
+    localStorage.setItem("agentlink-outbox:s1", JSON.stringify({ id: "m1", text: "继续", state: "uncertain" }));
+    vi.mocked(api.messageReceipt).mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ receipt: { clientMessageId: "m1", state: "accepted", updatedAt: 2, error: null } });
+    const { result } = renderHook(() => useMessageOutbox("s1"));
+    await act(async () => {});
+    expect(result.current.uncertain).toBe(true);
+    await act(async () => { window.dispatchEvent(new Event("online")); });
+    expect(result.current.uncertain).toBe(false); expect(result.current.input).toBe("");
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+  test("尚无回执不等于未接收；同文不同 ID 也不能补确认，可保留旧记录后发送新指令", async () => {
+    localStorage.setItem("agentlink-outbox:s1", JSON.stringify({ id: "m1", text: "继续", state: "uncertain" }));
+    vi.mocked(api.messageReceipt).mockResolvedValue({ receipt: null });
+    const { result } = renderHook(() => useMessageOutbox("s1", { history: () => [{ type: "userMessage", id: "other", clientMessageId: "different", text: "继续", at: 1 }] }));
+    await act(async () => {});
+    expect(result.current.uncertain).toBe(true);
+    act(() => result.current.beginNewPrompt());
+    expect(result.current.uncertain).toBe(false);
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({ id: "m1", text: "继续", state: "uncertain" });
+    vi.mocked(api.sendMessage).mockResolvedValue({ ok: true });
+    act(() => result.current.setInput("继续"));
+    await act(() => result.current.submit());
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.sendMessage).mock.calls[0]![2]).not.toBe("m1");
+  });
+  test.each(["accepted", "failed"] as const)("旧消息的迟到 %s 回执不能删除用户已开始编辑的新草稿", async (state) => {
+    localStorage.setItem("agentlink-outbox:s1", JSON.stringify({ id: "m1", text: "旧指令", state: "uncertain" }));
+    let finish!: (value: Awaited<ReturnType<typeof api.messageReceipt>>) => void;
+    vi.mocked(api.messageReceipt).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useMessageOutbox("s1"));
+    act(() => { result.current.beginNewPrompt(); result.current.setInput("我的新草稿"); });
+    await act(async () => { finish({ receipt: { clientMessageId: "m1", state, updatedAt: 2, error: null } }); });
+    expect(result.current.input).toBe("我的新草稿");
+    expect(result.current.uncertain).toBe(false);
+    expect(result.current.messages[0]?.state).toBe(state);
+    expect(JSON.parse(localStorage.getItem("agentlink-outbox:s1")!).text).toBe("我的新草稿");
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+  test("后台暂停核对，返回前台立即核对并在前台重试，退出后清理监听器和定时器", async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    localStorage.setItem("agentlink-outbox:s1", JSON.stringify({ id: "m1", text: "继续", state: "uncertain" }));
+    vi.mocked(api.messageReceipt).mockResolvedValueOnce({ receipt: { clientMessageId: "m1", state: "uncertain", updatedAt: 1, error: null } })
+      .mockResolvedValue({ receipt: { clientMessageId: "m1", state: "accepted", updatedAt: 2, error: null } });
+    const { result, unmount } = renderHook(() => useMessageOutbox("s1"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(api.messageReceipt).not.toHaveBeenCalled();
+    visibility.mockReturnValue("visible");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(result.current.uncertain).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(result.current.uncertain).toBe(false);
+    unmount(); window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(api.messageReceipt).toHaveBeenCalledTimes(2);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
   test("等待 HTTP 回执时立即显示发送记录；接收后直到桌面同步仍保留，重开可恢复", async () => {
     let confirm!: (value: { ok: true }) => void;
     vi.mocked(api.sendMessage).mockReturnValueOnce(new Promise((resolve) => { confirm = resolve; }));
@@ -68,7 +137,7 @@ describe("手机指令草稿与回执", () => {
     expect(renderHook(() => useMessageOutbox("s1")).result.current.messages).toEqual([]);
     expect(api.sendMessage).not.toHaveBeenCalled();
   });
-  test("旧锚点缺失不能冒充已同步；清除已接收的本地提示不影响草稿或未确认记录", () => {
+  test("旧锚点缺失不能冒充已同步；清除已接收的本地提示不影响草稿或未确认记录", async () => {
     localStorage.setItem("agentlink-outbox:s1", JSON.stringify({ text: "待确认草稿", id: "pending", state: "uncertain" }));
     const records = [
       { id: "old", text: "继续", at: 1, state: "accepted", afterId: "missing", knownUserIds: [] },
@@ -76,6 +145,7 @@ describe("手机指令草稿与回执", () => {
     ];
     localStorage.setItem("agentlink-messages:s1", JSON.stringify(records));
     const { result } = renderHook(() => useMessageOutbox("s1", { history: () => [{ id: "reply", type: "agentMessage", text: "新回复", at: 2 }] }));
+    await act(async () => {});
     expect(result.current.messages).toHaveLength(2);
     act(() => result.current.forgetAccepted(["old", "pending"]));
     expect(result.current.messages.map((m) => m.id)).toEqual(["pending"]);

@@ -73,7 +73,7 @@ export class ApiClient {
     });
   }
   messageReceipt(id: string, clientMessageId: string) {
-    return this.request<{ receipt: MessageReceipt | null }>(`/api/v1/sessions/${id}/messages/${encodeURIComponent(clientMessageId)}`);
+    return this.request<{ receipt: MessageReceipt | null }>(`/api/v1/sessions/${id}/messages/${encodeURIComponent(clientMessageId)}`, { cache: "no-store" });
   }
   interrupt(id: string) {
     return this.request<{ ok: boolean }>(`/api/v1/sessions/${id}/interrupt`, { method: "POST" });

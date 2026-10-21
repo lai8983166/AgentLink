@@ -39,7 +39,7 @@ function SessionView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
   const [queue, setQueue] = useState(0);
-  const { input, setInput, messages, sending, notice, uncertain, submit, recheck, forgetAccepted } = useMessageOutbox(sessionId, {
+  const { input, setInput, messages, sending, checking, notice, uncertain, submit, recheck, beginNewPrompt, forgetAccepted } = useMessageOutbox(sessionId, {
     history: () => queryClient.getQueryData<SessionDetailResponse>(["session", sessionId])?.session.history ?? [],
     onAccepted: () => { queryClient.invalidateQueries({ queryKey: ["session", sessionId] }); },
   });
@@ -451,7 +451,10 @@ function SessionView() {
 
       {/* 输入栏 */}
       {notice && <div role="status" className="composer-notice">
-        {notice} {uncertain && <button onClick={recheck}>核对发送结果</button>}
+        {notice} {uncertain && <>
+          <button disabled={checking} onClick={recheck}>{checking ? "核对中…" : "核对发送结果"}</button>
+          <button onClick={beginNewPrompt}>保留记录，输入新指令</button>
+        </>}
       </div>}
       <div
         className="composer"
