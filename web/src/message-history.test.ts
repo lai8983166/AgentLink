@@ -5,6 +5,13 @@ import { mergeOutgoingHistory, reconcileOutgoingHistory, type OutgoingMessage } 
 const row = (id: string, type: "userMessage" | "agentMessage", text = id): HistoryItem => ({ id, type, text, at: 1 });
 const message = (id = "phone-1"): OutgoingMessage => ({ id, text: "继续", at: 2, state: "accepted", afterId: "old-reply", knownUserIds: ["old-user"] });
 describe("发送后的即时消息与历史收敛", () => {
+  test("待确认记录不能仅凭相同文本合并消失，必须保留供核对", () => {
+    const history = [row("old-reply", "agentMessage"), row("other-user", "userMessage", "继续")];
+    const result = reconcileOutgoingHistory(history, [{ ...message(), state: "uncertain" }]);
+    expect(result.confirmedIds).toEqual([]);
+    expect(result.history.map((item) => item.id)).toEqual(["old-reply", "phone-1", "other-user"]);
+    expect(result.history[1]?.deliveryState).toBe("uncertain");
+  });
   test("模型先到仍将本地指令固定在发送位置；桌面 ID 不同也只显示一条", () => {
     const current = [row("old-reply", "agentMessage"), row("model", "agentMessage")];
     expect(mergeOutgoingHistory(current, [message()]).map((item) => item.id)).toEqual(["old-reply", "phone-1", "model"]);
