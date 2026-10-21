@@ -108,6 +108,9 @@ async function build(reset: boolean) {
     else if (action.type === "fileApproval") { state.requests = [commandRequest(3, "fileChange")]; state.revision++; push(); }
     else if (action.type === "done") { state.status = "completed"; state.requests = []; state.revision++; push(); }
     else if (action.type === "delayMessages") state.delayedMessages = true;
+    else if (action.type === "uncertainReceipt") fixture.controls.saveDelivery("old1", action.text, {
+      clientMessageId: action.messageId, state: "uncertain", updatedAt: Date.now(), error: "ipc closed: thread-follower-start-turn",
+    });
     else if (action.type === "output") {
       const item = { id: "external-output", type: "agentMessage", text: action.text, status: "completed" };
       const turn = state.turns.at(-1);
