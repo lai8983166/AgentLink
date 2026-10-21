@@ -23,7 +23,8 @@ export function reconcileOutgoingHistory(history: HistoryItem[], messages: Outgo
       (item.clientMessageId === message.id || item.id === message.id));
     const anchor = message.afterId === null ? -1 : history.findIndex((item) => item.id === message.afterId);
     // 本地 app-server 的旧消息没有关联 ID：只匹配发送时尚不存在、锚点之后的一条消息。
-    const fallback = !identity && (message.afterId === null || anchor >= 0) ? history.find((item, index) =>
+    // 待确认记录必须保留核对依据，不能仅凭相同文本推断接收成功。
+    const fallback = !identity && message.state !== "uncertain" && (message.afterId === null || anchor >= 0) ? history.find((item, index) =>
       item.type === "userMessage" && !item.clientMessageId && !matched.has(item.id) &&
       index > anchor && !message.knownUserIds.includes(item.id) && item.text.trim() === message.text.trim()) : undefined;
     const found = identity || fallback;
