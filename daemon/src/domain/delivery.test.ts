@@ -4,8 +4,31 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ControlStore } from "./control-store";
 import { SessionRegistry } from "./sessions";
+import type { HistoryItem } from "@agentlink/shared";
 
 describe("指令接收回执和重启恢复", () => {
+  test("回执丢失后用原会话同 ID、同内容补确认并持久化，重复请求不再次执行", async () => {
+    const store = new ControlStore();
+    store.saveDelivery("s1", "继续推进", { clientMessageId: "m1", state: "uncertain", updatedAt: 1, error: "ipc closed" });
+    const registry = new SessionRegistry({} as never, {} as never, {} as never, {} as never, store);
+    let history: HistoryItem[] = [];
+    let sends = 0;
+    registry.setDesktopManager({ historyFor: () => history, isTakenOver: () => true, sendTurn: async () => { sends++; } } as never);
+    expect(registry.messageReceipt("s1", "m1")?.state).toBe("uncertain");
+    history = [{ type: "userMessage", id: "other", clientMessageId: "different", text: "继续推进", at: 2 }];
+    expect(registry.messageReceipt("s1", "m1")?.state).toBe("uncertain");
+    history = [{ type: "userMessage", id: "native", clientMessageId: "m1", text: "其他内容", at: 2 }];
+    expect(registry.messageReceipt("s1", "m1")?.state).toBe("uncertain");
+    history = [{ type: "userMessage", id: "native", clientMessageId: "m1", text: "继续推进\n", at: 2 }];
+    expect((await registry.sendMessage("s1", "继续推进", "m1")).state).toBe("accepted");
+    expect(registry.messageReceipt("s1", "m1")).toMatchObject({ state: "accepted", error: null });
+    expect(store.delivery("s1", "m1")?.state).toBe("accepted");
+    history = []; // 快照裁剪后仍记住确认结果。
+    expect(registry.messageReceipt("s1", "m1")?.state).toBe("accepted");
+    expect(sends).toBe(0);
+    await registry.sendMessage("s1", "新任务", "m2"); expect(sends).toBe(1);
+    store.close();
+  });
   test("任务还在异步创建、尚未进入 live 时也必须阻止重启", async () => {
     const store = new ControlStore();
     let resolvePath!: (p: string) => void;
