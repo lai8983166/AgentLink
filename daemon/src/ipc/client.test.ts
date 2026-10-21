@@ -57,6 +57,8 @@ class FakePipe implements PipeLikeSocket {
     this.dataCb?.(Buffer.concat([head, body]));
   }
 
+  feedRaw(bytes: Buffer): void { this.dataCb?.(bytes); }
+
   /** 分片喂入（测分帧） */
   feedChunked(obj: unknown): void {
     const body = Buffer.from(JSON.stringify(obj));
@@ -93,11 +95,29 @@ function setup() {
 }
 
 describe("IpcClient（任务 1.1/1.2）", () => {
+  test("一个会话的超限帧不会断开共享管道，其他会话广播和请求仍可处理", async () => {
+    const pipe = new FakePipe();
+    const client = new IpcClient(() => pipe, { maxFrameBytes: 256 });
+    const received: IpcBroadcast[] = [];
+    client.broadcastHandler = (event) => received.push(event);
+    client.connect(); pipe.fireConnect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const header = Buffer.alloc(4); header.writeUInt32LE(1024);
+    const payload = Buffer.concat([header, Buffer.alloc(1024, 32)]);
+    pipe.feedRaw(payload.subarray(0, 33)); pipe.feedRaw(payload.subarray(33));
+    pipe.feedRaw(Buffer.from([4, 0, 0, 0, 110, 117, 108, 108])); // 非对象 JSON 不能破坏后续帧。
+    pipe.serverSend({ type: "broadcast", params: { conversationId: "other", change: { type: "snapshot" } } });
+    expect(client.state).toBe("open");
+    expect(pipe.destroyed).toBe(false);
+    expect(received[0]?.params?.conversationId).toBe("other");
+    expect((await client.callFull("thread-owner-discovery", {})).resultType).toBe("success");
+    client.disconnect();
+  });
   test("旧管道迟到关闭不影响新连接；断线清除残留半帧", async () => {
     const { client, pipes } = setup();
     await new Promise((r) => setTimeout(r, 10));
     const old = pipes[0]!;
-    (client as unknown as { buf: Buffer }).buf = Buffer.from([100, 0, 0]);
+    old.feedRaw(Buffer.from([100, 0, 0]));
     old.closeCb?.();
     await new Promise((r) => setTimeout(r, 550));
     pipes[1]!.fireConnect();
