@@ -53,6 +53,7 @@ describe("手机指令草稿与回执", () => {
     expect(result.current.input).toBe("我的新草稿");
     expect(result.current.uncertain).toBe(false);
     expect(result.current.messages[0]?.state).toBe(state);
+    expect(result.current.notice).toBe(state === "accepted" ? "旧指令已确认接收，新草稿已保留" : "旧指令发送失败，新草稿已保留");
     expect(JSON.parse(localStorage.getItem("agentlink-outbox:s1")!).text).toBe("我的新草稿");
     expect(api.sendMessage).not.toHaveBeenCalled();
   });
