@@ -58,6 +58,8 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
     if (next.length !== current.length) saveMessages(next);
     if (outboxRef.current.state === "uncertain" && exact(outboxRef.current)) {
       save(empty()); setNotice("已从原会话确认接收");
+    } else if (outboxRef.current.state === "draft" && current.some((message) => message.state === "uncertain" && exact(message))) {
+      setNotice("旧指令已从原会话确认接收，新草稿已保留");
     }
   }, [messages, options.history, outbox.id, outbox.state]);
   // 只查询结果，不重新执行。返回前台或恢复网络后立即核对，前台定时补偿回执丢失。
@@ -92,6 +94,7 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
     record(id, "accepted");
     // 查询旧消息时用户可能已经在写新草稿，迟到回执不能清掉新输入。
     if (outboxRef.current.id === id) { save(empty()); setNotice("电脑端已接收"); }
+    else if (outboxRef.current.state === "draft") setNotice("旧指令已确认接收，新草稿已保留");
     options.onAccepted?.();
   }
   async function recheck() {
@@ -106,6 +109,7 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
       else if (receipt?.state === "failed") {
         record(id, "failed");
         if (outboxRef.current.id === id) { save({ ...pending, state: "failed" }); setNotice(receipt.error ?? "电脑端未接收，可重试发送"); }
+        else if (outboxRef.current.state === "draft") setNotice("旧指令发送失败，新草稿已保留");
       } else if (outboxRef.current.id === id) setNotice(receipt?.error ?? "发送结果仍待确认，旧记录已保留；可核对原会话或输入新指令");
     } catch { if (alive.current && outboxRef.current.id === id) setNotice("暂时无法核对发送结果，请连接恢复后重试"); }
     finally { checkingIds.current.delete(id); if (alive.current) setChecking(checkingIds.current.size > 0); }
@@ -156,6 +160,7 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
       const current = outboxRef.current;
       if (text === current.text) return;
       if (current.state === "uncertain" && current.id) record(current.id, "uncertain", current.text);
-      save({ text, id: null, state: "draft" }); setNotice(null);
+      save({ text, id: null, state: "draft" });
+      if (current.state === "uncertain") setNotice("旧指令仍待核对，记录已保留；可输入新指令");
     }, };
 }
