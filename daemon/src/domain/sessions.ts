@@ -412,7 +412,7 @@ export class SessionRegistry {
   sendMessage(id: string, text: string, clientMessageId: string = crypto.randomUUID()): Promise<MessageReceipt> {
     this.ensureAccepting();
     const key = `${id}:${clientMessageId}`;
-    const previous = this.controls.delivery(id, clientMessageId);
+    const previous = this.deliveryWithHistory(id, clientMessageId);
     if (previous && previous.text !== text) throw new DaemonError("VALIDATION_ERROR", "同一消息 ID 不能用于不同内容");
     const pending = this.sending.get(key);
     if (pending) return pending;
@@ -437,10 +437,22 @@ export class SessionRegistry {
   }
 
   messageReceipt(id: string, clientMessageId: string): MessageReceipt | null {
-    const delivery = this.controls.delivery(id, clientMessageId);
+    const delivery = this.deliveryWithHistory(id, clientMessageId);
     if (!delivery) return null;
     const { text: _, ...receipt } = delivery;
     return receipt;
+  }
+
+  /** IPC 回执丢失后，仅原会话中同 ID、同内容的用户消息能够补确认；缺少历史不是未接收。 */
+  private deliveryWithHistory(id: string, clientMessageId: string) {
+    const delivery = this.controls.delivery(id, clientMessageId);
+    if (!delivery || delivery.state !== "uncertain" || this.sending.has(`${id}:${clientMessageId}`)) return delivery;
+    const history = this.live.get(id)?.history ?? this.desktop?.historyFor?.(id);
+    if (!history?.some((item) => item.type === "userMessage" &&
+      (item.clientMessageId === clientMessageId || item.id === clientMessageId) && item.text.trim() === delivery.text.trim())) return delivery;
+    const receipt: MessageReceipt = { clientMessageId, state: "accepted", updatedAt: Date.now(), error: null };
+    this.controls.saveDelivery(id, delivery.text, receipt);
+    return { ...receipt, text: delivery.text };
   }
 
   private async dispatchMessage(id: string, text: string, clientMessageId: string): Promise<void> {

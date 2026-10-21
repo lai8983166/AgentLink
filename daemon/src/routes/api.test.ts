@@ -50,6 +50,13 @@ async function setup() {
 /* ============ 5.1 REST：认证 + 错误 envelope ============ */
 
 describe("REST API", () => {
+  test("回执核对明确禁用缓存，没有记录时返回 null 而不伪造未接收结论", async () => {
+    const { app, authed } = await setup();
+    const response = await app.request("/api/v1/sessions/old1/messages/unknown", { headers: authed });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual({ receipt: null });
+  });
   test("health 免认证", async () => {
     const { app } = await setup();
     const res = await app.request("/api/v1/health");

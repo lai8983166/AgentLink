@@ -123,8 +123,10 @@ export function createApiRouter(deps: ApiDeps): Hono {
     return c.json({ ok: true, receipt });
   });
 
-  api.get("/api/v1/sessions/:id/messages/:messageId", (c) =>
-    c.json({ receipt: deps.registry.messageReceipt(c.req.param("id"), c.req.param("messageId")) }));
+  api.get("/api/v1/sessions/:id/messages/:messageId", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ receipt: deps.registry.messageReceipt(c.req.param("id"), c.req.param("messageId")) });
+  });
 
   api.post("/api/v1/sessions/:id/interrupt", async (c) => {
     await deps.registry.interrupt(c.req.param("id"));
