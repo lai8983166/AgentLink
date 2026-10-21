@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { CODEX_PIPE, IPC_VERSIONS, type IpcBroadcast, type IpcResponse } from "./protocol";
+import { IpcFramer } from "./framer";
 
 /**
  * codex-ipc 命名管道客户端（任务 1.1/1.2）：
@@ -37,7 +38,7 @@ export class IpcClient {
   broadcastHandler: (b: IpcBroadcast) => void = () => {};
 
   private socket: PipeLikeSocket | null = null;
-  private buf = Buffer.alloc(0);
+  private readonly framer: IpcFramer;
   private pending = new Map<string, Pending>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private backoffMs = 500;
@@ -46,8 +47,14 @@ export class IpcClient {
 
   constructor(
     private readonly socketFactory: PipeSocketFactory = createRealPipeSocket,
-    private readonly opts: { callTimeoutMs?: number; log?: (...a: unknown[]) => void } = {},
-  ) {}
+    private readonly opts: { callTimeoutMs?: number; maxFrameBytes?: number; log?: (...a: unknown[]) => void } = {},
+  ) {
+    this.framer = new IpcFramer((body) => {
+      let message: unknown;
+      try { message = JSON.parse(body.toString("utf-8")); } catch { return; }
+      if (message && typeof message === "object") this.handleMessage(message as Record<string, unknown>);
+    }, (bytes) => this.log("[ipc] 跳过超限数据帧，保留其他会话连接，字节数:", bytes), opts.maxFrameBytes);
+  }
 
   connect(): void {
     this.shouldConnect = true;
@@ -83,10 +90,10 @@ export class IpcClient {
       return;
     }
     this.socket = socket;
-    this.buf = Buffer.alloc(0);
+    this.framer.reset();
     socket.on("error", () => this.handleClose(socket));
     socket.on("close", () => this.handleClose(socket));
-    socket.on("data", (d) => { if (this.socket === socket) this.feed(d); });
+    socket.on("data", (d) => { if (this.socket === socket) this.framer.push(d); });
     socket.on("connect", () => {
       if (this.socket !== socket) return;
       // 每次连接（含重连）都重新握手
@@ -115,7 +122,7 @@ export class IpcClient {
   private handleClose(socket = this.socket): void {
     if (!socket || this.socket !== socket) return;
     this.socket = null;
-    this.buf = Buffer.alloc(0);
+    this.framer.reset();
     this.peerInfo = null;
     this.clientId = "initializing-client";
     socket.destroy();
@@ -137,29 +144,6 @@ export class IpcClient {
       this.open();
     }, this.backoffMs);
     this.backoffMs = Math.min(this.backoffMs * 2, 10000);
-  }
-
-  private feed(d: Buffer): void {
-    this.buf = Buffer.concat([this.buf, d]);
-    for (;;) {
-      if (this.buf.length < 4) return;
-      const len = this.buf.readUInt32LE(0);
-      if (len > 64 * 1024 * 1024) {
-        this.log("[ipc] 拒绝过大的数据帧");
-        this.handleClose();
-        return;
-      }
-      if (this.buf.length < 4 + len) return;
-      const body = this.buf.subarray(4, 4 + len);
-      this.buf = this.buf.subarray(4 + len);
-      let msg: Record<string, unknown>;
-      try {
-        msg = JSON.parse(body.toString("utf-8"));
-      } catch {
-        continue;
-      }
-      this.handleMessage(msg);
-    }
   }
 
   private handleMessage(msg: Record<string, unknown>): void {
