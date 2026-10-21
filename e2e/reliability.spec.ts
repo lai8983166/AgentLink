@@ -5,6 +5,53 @@ test.beforeEach(async ({ page, request }) => {
   await page.addInitScript(() => localStorage.setItem("agentlink-token", "isolated-e2e-token"));
 });
 
+test("原会话已接收但旧回执待确认：重开自动解除发送限制，旧指令不重发", async ({ page, request }) => {
+  await page.goto("/old1"); await page.getByRole("button", { name: "接管此会话" }).click();
+  const input = page.getByRole("textbox");
+  await input.fill("继续推进"); await page.getByRole("button", { name: "↑", exact: true }).click();
+  await expect(input).toHaveValue("");
+  await expect(page.locator('[data-message-id^="server-"]')).toHaveCount(1);
+  const messageId = (await (await request.post("/__test__/metrics")).json()).sends[0] as string;
+  await request.post("/__test__/control", { data: { type: "uncertainReceipt", messageId, text: "继续推进" } });
+  const receipt = await request.get(`/api/v1/sessions/old1/messages/${messageId}`, { headers: { Authorization: "Bearer isolated-e2e-token" } });
+  expect((await receipt.json()).receipt.state).toBe("accepted");
+  await page.evaluate((id) => {
+    localStorage.setItem("agentlink-outbox:old1", JSON.stringify({ id, text: "继续推进", state: "sending" }));
+    localStorage.setItem("agentlink-messages:old1", JSON.stringify([{ id, text: "继续推进", state: "uncertain", at: Date.now(), afterId: "old-anchor", knownUserIds: [] }]));
+  }, messageId);
+  await page.reload();
+  await expect(input).toHaveValue("");
+  await expect(page.getByRole("button", { name: "保留记录，输入新指令" })).toHaveCount(0);
+  await input.fill("继续推进"); await page.getByRole("button", { name: "↑", exact: true }).click();
+  await expect(input).toHaveValue("");
+  const metrics = await (await request.post("/__test__/metrics")).json();
+  expect(metrics.sends).toHaveLength(2); expect(new Set(metrics.sends).size).toBe(2);
+});
+
+test("确实无法核对的旧记录不丢失，允许输入新指令，迟到回执不覆盖新草稿", async ({ page, request }) => {
+  await page.goto("/old1"); await page.getByRole("button", { name: "接管此会话" }).click();
+  await page.evaluate(() => localStorage.setItem("agentlink-outbox:old1", JSON.stringify({ id: "unconfirmed", text: "无法核对的旧指令", state: "uncertain" })));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/v1/sessions/old1/messages/unconfirmed", async (route) => { const response = await route.fetch(); await gate; await route.fulfill({ response }); });
+  try {
+    await page.reload();
+    await page.getByRole("button", { name: "保留记录，输入新指令" }).click();
+    const input = page.getByRole("textbox"); await input.fill("保留这份新草稿");
+    release();
+    await expect(input).toHaveValue("保留这份新草稿");
+    await expect(page.locator('[data-message-id="unconfirmed"]')).toContainText("无法核对的旧指令");
+    await page.getByRole("button", { name: "↑", exact: true }).click();
+    await expect(input).toHaveValue("");
+    const metrics = await (await request.post("/__test__/metrics")).json();
+    expect(metrics.sends).toHaveLength(1); expect(metrics.sends[0]).not.toBe("unconfirmed");
+    await input.fill("下一份草稿"); await page.reload();
+    await expect(input).toHaveValue("下一份草稿");
+    await expect(page.locator('[data-message-id="unconfirmed"]')).toContainText("无法核对的旧指令");
+    if (test.info().project.name === "mobile") await page.screenshot({ path: test.info().outputPath("uncertain-prompt-recovery.png") });
+  } finally { release(); }
+});
+
 for (const blocked of [true, false]) {
   test(`${blocked ? "实时通道完全不可用" : "连接在线但输出事件丢失"}：接收成功后自动核对完整输出，不重发且草稿保留`, async ({ page, request }) => {
     await page.routeWebSocket("**/api/v1/ws*", (socket) => {
