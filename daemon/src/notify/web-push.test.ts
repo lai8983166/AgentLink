@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { createECDH, randomBytes } from "node:crypto";
 import type { SessionEvent } from "@agentlink/shared";
 import { PushStore } from "./push-store";
-import { WebPushService, validPushEndpoint, type PushSender } from "./web-push";
+import { WebPushService, validPushEndpoint, sendWebPush, type PushSender } from "./web-push";
+import webpush from "web-push";
 import { createPushRouter } from "../routes/push";
 
 function subscription() {
@@ -20,6 +21,25 @@ function service(send: PushSender = async () => {}, path?: string, now?: () => n
 afterEach(async () => { await Promise.all(services.splice(0).map((s) => s.close())); });
 
 describe("AgentLink Web Push", () => {
+  test("通知落盘失败不能中断模型事件，恢复后重复状态可以重新记录", async () => {
+    let calls = 0; const push = service(async () => { calls++; }); push.subscribe(subscription());
+    const original = push.store.taskStatus.bind(push.store);
+    push.store.taskStatus = () => { throw new Error("disk failure"); };
+    expect(() => push.onEvent(event("running"))).not.toThrow();
+    push.store.taskStatus = original;
+    push.onEvent(event("running")); push.onEvent(event("done")); await push.flush(); expect(calls).toBe(1);
+  });
+  test("发送使用标准加密和 VAPID，明确限制总等待时间且禁止重定向", async () => {
+    const original = globalThis.fetch; const keys = webpush.generateVAPIDKeys();
+    let sent: RequestInit | undefined;
+    globalThis.fetch = (async (_url, init) => { sent = init; return new Response("", { status: 201 }); }) as typeof fetch;
+    try {
+      await sendWebPush(subscription(), "private notification", { vapidDetails: { ...keys, subject: "https://agentlink.test" } });
+      expect(sent?.redirect).toBe("error"); expect(sent?.signal).toBeDefined();
+      expect((sent?.headers as Record<string, string>)["Content-Encoding"]).toBe("aes128gcm");
+      expect(Buffer.from(sent?.body as Uint8Array).toString()).not.toContain("private notification");
+    } finally { globalThis.fetch = original; }
+  });
   test("首次打开旧完成记录不通知，真实一轮完成只通知一次，下一轮仍通知", async () => {
     const sent: string[] = []; const push = service(async (_, payload) => { sent.push(payload); });
     push.subscribe(subscription());

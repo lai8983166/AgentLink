@@ -61,6 +61,7 @@ export class PushStore {
     for (const d of devices) this.db.run("INSERT OR IGNORE INTO jobs VALUES (?,?,?,?,0,?,?)", [randomUUID(), d.id, eventId, payload, now, now + 86400000]);
   }
   due(now: number): PushJob[] {
+    this.db.run("UPDATE devices SET lastError='有通知已超过 24 小时有效期，不再重试，请重新测试通知' WHERE id IN (SELECT deviceId FROM jobs WHERE expiresAt<=?)", [now]);
     this.db.run("DELETE FROM jobs WHERE expiresAt<=?", [now]);
     return this.db.query("SELECT jobs.*,devices.endpoint,devices.p256dh,devices.auth FROM jobs JOIN devices ON devices.id=jobs.deviceId WHERE nextAt<=? ORDER BY nextAt LIMIT 20").all(now) as PushJob[];
   }
