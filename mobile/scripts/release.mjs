@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, copyFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, copyFileSync, readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -14,7 +14,10 @@ const result = spawnSync(process.platform === "win32" ? "gradlew.bat" : "bash", 
 if (result.status !== 0) process.exit(result.status ?? 1);
 const apk = join(android, "app/build/outputs/apk/release/app-release.apk");
 const release = join(mobile, "release"); mkdirSync(release, { recursive: true });
-copyFileSync(apk, join(release, "AgentLink.apk"));
+// 下载接口可以同时读取旧包；新包完整复制后再替换，避免下载到半个 APK。
+const staged = join(release, "AgentLink.apk.next");
+copyFileSync(apk, staged);
+renameSync(staged, join(release, "AgentLink.apk"));
 const sha256 = createHash("sha256").update(readFileSync(apk)).digest("hex");
 writeFileSync(join(release, "AgentLink.apk.sha256"), sha256 + "  AgentLink.apk\n");
 console.log("APK ready: " + join(release, "AgentLink.apk"));
