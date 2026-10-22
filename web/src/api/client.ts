@@ -5,6 +5,9 @@ import type {
   SessionListResponse,
   StatusResponse,
   MessageReceipt,
+  PushConfigResponse,
+  PushDeviceStatus,
+  PushSubscriptionInput,
 } from "@agentlink/shared";
 
 /** daemon REST 客户端：token + 错误 envelope 解析 */
@@ -56,6 +59,18 @@ export class ApiClient {
 
   status(refreshLimits = false) {
     return this.request<StatusResponse>(`/api/v1/status${refreshLimits ? "?refreshLimits=1" : ""}`, { cache: "no-store" });
+  }
+  pushConfig(deviceId: string | null) {
+    return this.request<PushConfigResponse>(`/api/v1/push/config${deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : ""}`, { cache: "no-store" });
+  }
+  pushSubscribe(subscription: PushSubscriptionInput) {
+    return this.request<{ device: PushDeviceStatus }>("/api/v1/push/subscriptions", { method: "POST", body: JSON.stringify(subscription) });
+  }
+  pushRemove(id: string) {
+    return this.request<{ ok: boolean }>(`/api/v1/push/subscriptions/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+  pushTest(id: string) {
+    return this.request<{ device: PushDeviceStatus | null }>(`/api/v1/push/subscriptions/${encodeURIComponent(id)}/test`, { method: "POST" });
   }
   sessions() {
     return this.request<SessionListResponse>("/api/v1/sessions");
