@@ -16,6 +16,8 @@ export class PushStore {
     this.db.run("PRAGMA foreign_keys=ON");
     this.db.run("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     this.db.run("CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, endpoint TEXT UNIQUE NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, lastAcceptedAt INTEGER, lastError TEXT)");
+    const columns = this.db.query("PRAGMA table_info(devices)").all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "transport")) this.db.run("ALTER TABLE devices ADD COLUMN transport TEXT NOT NULL DEFAULT 'web'");
     this.db.run("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, active INTEGER NOT NULL, cycle INTEGER NOT NULL)");
     this.db.run("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, deviceId TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE, eventId TEXT NOT NULL, payload TEXT NOT NULL, attempts INTEGER NOT NULL, nextAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL, UNIQUE(deviceId,eventId))");
   }
@@ -36,6 +38,24 @@ export class PushStore {
     return this.db.query("SELECT id,lastAcceptedAt,lastError,(SELECT COUNT(*) FROM jobs WHERE deviceId=devices.id) AS pending FROM devices WHERE id=?").get(id) as PushDeviceStatus | null;
   }
   hasDevices(): boolean { return !!this.db.query("SELECT 1 FROM devices LIMIT 1").get(); }
+  registerNative(id: string): void {
+    this.db.run("INSERT OR IGNORE INTO devices (id,endpoint,p256dh,auth,transport) VALUES (?,?, '','', 'native')", [id, `native:${id}`]);
+  }
+  isNative(id: string): boolean {
+    return !!this.db.query("SELECT 1 FROM devices WHERE id=? AND transport='native'").get(id);
+  }
+  nativeInbox(id: string, now: number): Array<{ id: string; payload: string; expiresAt: number }> {
+    this.expire(now);
+    return this.db.query("SELECT jobs.id,payload,expiresAt FROM jobs JOIN devices ON devices.id=jobs.deviceId WHERE deviceId=? AND transport='native' ORDER BY jobs.rowid LIMIT 50").all(id) as Array<{ id: string; payload: string; expiresAt: number }>;
+  }
+  acknowledgeNative(id: string, ids: string[], now: number): void {
+    if (!this.isNative(id)) return;
+    this.db.transaction(() => {
+      let changes = 0;
+      for (const jobId of ids) changes += this.db.run("DELETE FROM jobs WHERE id=? AND deviceId=?", [jobId, id]).changes;
+      if (changes) this.db.run("UPDATE devices SET lastAcceptedAt=?,lastError=NULL WHERE id=?", [now, id]);
+    })();
+  }
   remove(id: string): void { this.db.run("DELETE FROM devices WHERE id=?", [id]); }
   revokeAll(): void { this.db.run("DELETE FROM devices"); }
 
@@ -61,9 +81,12 @@ export class PushStore {
     for (const d of devices) this.db.run("INSERT OR IGNORE INTO jobs VALUES (?,?,?,?,0,?,?)", [randomUUID(), d.id, eventId, payload, now, now + 86400000]);
   }
   due(now: number): PushJob[] {
+    this.expire(now);
+    return this.db.query("SELECT jobs.*,devices.endpoint,devices.p256dh,devices.auth FROM jobs JOIN devices ON devices.id=jobs.deviceId WHERE transport='web' AND nextAt<=? ORDER BY nextAt LIMIT 20").all(now) as PushJob[];
+  }
+  private expire(now: number): void {
     this.db.run("UPDATE devices SET lastError='有通知已超过 24 小时有效期，不再重试，请重新测试通知' WHERE id IN (SELECT deviceId FROM jobs WHERE expiresAt<=?)", [now]);
     this.db.run("DELETE FROM jobs WHERE expiresAt<=?", [now]);
-    return this.db.query("SELECT jobs.*,devices.endpoint,devices.p256dh,devices.auth FROM jobs JOIN devices ON devices.id=jobs.deviceId WHERE nextAt<=? ORDER BY nextAt LIMIT 20").all(now) as PushJob[];
   }
   accepted(job: PushJob, now: number): void {
     this.db.run("DELETE FROM jobs WHERE id=?", [job.id]);

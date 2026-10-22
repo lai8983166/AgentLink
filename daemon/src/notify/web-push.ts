@@ -1,4 +1,5 @@
 import webpush from "web-push";
+import { EventEmitter } from "node:events";
 import { createHash, randomUUID } from "node:crypto";
 import type { ListEvent, SessionEvent, PushSubscriptionInput } from "@agentlink/shared";
 import { PushStore, type PushJob } from "./push-store";
@@ -33,9 +34,11 @@ export class WebPushService {
   private syncTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private recordFailures = 0;
+  private inboxChanged = new EventEmitter();
   constructor(readonly store: PushStore, private readonly send: PushSender = sendWebPush, private readonly now = Date.now) {
     this.keys = store.keys(webpush.generateVAPIDKeys);
     this.publicKey = this.keys.publicKey;
+    this.inboxChanged.setMaxListeners(100);
   }
   subscribe(s: PushSubscriptionInput): string {
     if (!validPushEndpoint(s.endpoint) || Buffer.from(s.keys.p256dh, "base64url").length !== 65 || Buffer.from(s.keys.auth, "base64url").length !== 16) throw new Error("INVALID_PUSH_SUBSCRIPTION");
@@ -59,12 +62,27 @@ export class WebPushService {
       }), this.now());
       this.statuses.set(e.sessionId, e.status);
       if (this.statuses.size > 1000) this.statuses.delete(this.statuses.keys().next().value!);
-      if (e.status === "done" || e.status === "error") void this.flush();
+      if (e.status === "done" || e.status === "error") { this.inboxChanged.emit("change"); void this.flush(); }
     }
   }
   async test(id: string): Promise<void> {
     this.store.enqueue(`test:${randomUUID()}`, JSON.stringify({ title: "AgentLink · 测试通知", body: "收到此通知表示手机推送已接通。", url: "/settings", tag: "agentlink-test" }), this.now(), id);
+    this.inboxChanged.emit("change");
     await this.flush();
+  }
+  /** 安卓长轮询：读取不删除；只有手机展示后确认才移除。 */
+  async nativeInbox(id: string, signal?: AbortSignal, waitMs = 20000) {
+    const read = () => this.store.nativeInbox(id, this.now()).map(({ payload, ...job }) => ({ ...job, notification: JSON.parse(payload) }));
+    const jobs = read();
+    if (jobs.length || signal?.aborted || this.stopped || waitMs === 0) return jobs;
+    await new Promise<void>((resolve) => {
+      const finish = () => { clearTimeout(timer); this.inboxChanged.off("change", changed); signal?.removeEventListener("abort", finish); resolve(); };
+      const changed = () => { if (!this.store.isNative(id) || read().length || this.stopped) finish(); };
+      const timer = setTimeout(finish, waitMs);
+      this.inboxChanged.on("change", changed);
+      signal?.addEventListener("abort", finish, { once: true });
+    });
+    return this.stopped || signal?.aborted ? [] : read();
   }
   start(sync?: () => Promise<unknown>): void {
     if (this.timer) return;
@@ -81,6 +99,7 @@ export class WebPushService {
   }
   stop(): void {
     this.stopped = true;
+    this.inboxChanged.emit("change");
     if (this.timer) clearInterval(this.timer);
     if (this.syncTimer) clearInterval(this.syncTimer);
     this.timer = null; this.syncTimer = null;
