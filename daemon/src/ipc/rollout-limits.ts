@@ -13,7 +13,9 @@ import type { RateLimitWindow } from "@agentlink/shared";
 const rolloutCache = new Map<string, string | null>();
 
 export function findRollout(conversationId: string, sessionsRoot = join(homedir(), ".codex", "sessions")): string | null {
-  if (rolloutCache.has(conversationId)) return rolloutCache.get(conversationId) ?? null;
+  const key = join(sessionsRoot, conversationId);
+  const cached = rolloutCache.get(key);
+  if (cached && existsSync(cached)) return cached;
   let found: string | null = null;
   if (existsSync(sessionsRoot)) {
     const files = readdirSync(sessionsRoot, { recursive: true, encoding: "utf8" }) as string[];
@@ -24,7 +26,8 @@ export function findRollout(conversationId: string, sessionsRoot = join(homedir(
       }
     }
   }
-  rolloutCache.set(conversationId, found);
+  // 新会话的文件可能尚未创建；不能永久缓存这一次的缺失。
+  if (found) rolloutCache.set(key, found);
   if (rolloutCache.size > 100) {
     const first = rolloutCache.keys().next().value;
     if (first !== undefined) rolloutCache.delete(first);
@@ -66,14 +69,14 @@ export function tailRateLimits(
     let measuredAt: number | null = null;
     for (let i = lines.length - 1; i >= 0; i--) {
       const l = lines[i];
-      if (!l || !l.includes("rate_limits")) continue;
+      if (!l || (!l.includes("rate_limits") && !l.includes("rateLimits"))) continue;
       try {
         const rec = JSON.parse(l) as Record<string, unknown>;
         const payload = (rec.payload ?? rec) as Record<string, unknown>;
         const rl = (payload.rate_limits ?? rec.rate_limits ?? payload.rateLimits) as
           | { primary?: unknown; secondary?: unknown }
           | undefined;
-        if (rl) {
+        if (rl && parseWindow(rl.primary)) {
           last = rl;
           const ts = rec.timestamp;
           if (typeof ts === "string") {
@@ -99,18 +102,11 @@ export function tailRateLimits(
 
 export type RolloutLimits = NonNullable<ReturnType<typeof tailRateLimits>>;
 
-/** 合并多条来源：按 (resetsAt, usedPercent) 取各窗口最新值（同窗口内用量单调增，值大者新） */
+/** 选择真实测量时间最新的完整快照，禁止把不同记录的窗口与时间拼接。 */
 export function mergeLimits(a: RolloutLimits | null, b: RolloutLimits | null): RolloutLimits | null {
   if (!a) return b;
   if (!b) return a;
-  const pick = (x: RateLimitWindow, y: RateLimitWindow) =>
-    y.resetsAt > x.resetsAt || (y.resetsAt === x.resetsAt && y.usedPercent > x.usedPercent) ? y : x;
-  const secondary = [a.secondary, b.secondary].filter((w): w is RateLimitWindow => w !== null);
-  return {
-    primary: pick(a.primary, b.primary),
-    secondary: secondary.length ? secondary.reduce((acc, w) => pick(acc, w)) : null,
-    measuredAt: Math.max(a.measuredAt ?? 0, b.measuredAt ?? 0) || null,
-  };
+  return (b.measuredAt ?? 0) > (a.measuredAt ?? 0) ? b : a;
 }
 
 /** 观察中会话 + 全局最近活跃的 rollout（最多 2 个）合并取最新——账户级额度，别的会话干活也算 */
