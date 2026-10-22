@@ -10,6 +10,7 @@ build/
 *.log
 dist-mobile/
 .gradle/
+.kotlin/
 local.properties
 *.jks
 *.keystore
