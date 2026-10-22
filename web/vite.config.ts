@@ -19,7 +19,7 @@ export default defineConfig({
       // Activate new caches for legacy installations; our own updater controls page reload.
       registerType: "autoUpdate",
       injectRegister: false,
-      includeAssets: ["icons/icon.svg"],
+      includeAssets: ["icons/icon.svg", "push-worker.js"],
       manifest: {
         name: "AgentLink",
         short_name: "AgentLink",
@@ -35,6 +35,7 @@ export default defineConfig({
         ],
       },
       workbox: {
+        importScripts: ["/push-worker.js"],
         clientsClaim: true,
         skipWaiting: true,
         globIgnores: ["**/version.json"],

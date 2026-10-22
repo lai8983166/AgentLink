@@ -4,6 +4,9 @@ import { api } from "../runtime";
 import { useStore } from "../store";
 import { applyAppUpdate, checkAppUpdate, useAppUpdate } from "../app-updater";
 import { KeyboardDiagnostics } from "../components/KeyboardDiagnostics";
+import { PushSettings } from "../components/PushSettings";
+import { disablePush, pushDeviceId } from "../push-client";
+import { useState } from "react";
 
 /** 设置页（任务 7.7）：连接状态 / 通知说明 / 审计入口 / 解除配对 */
 export function Settings() {
@@ -11,6 +14,7 @@ export function Settings() {
   const clearToken = useStore((s) => s.clearToken);
   const wsConnected = useStore((s) => s.wsConnected);
   const statusQ = useQuery({ queryKey: ["status"], queryFn: () => api.status(), refetchInterval: 15000 });
+  const [unpairError, setUnpairError] = useState<string | null>(null);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100dvh" }}>
@@ -62,18 +66,7 @@ export function Settings() {
         </div>
 
         <KeyboardDiagnostics />
-        <div className="section-label">通知（ntfy）</div>
-        <div className="card" style={{ cursor: "default", fontSize: 13, color: "var(--text-dim)", lineHeight: 1.7 }}>
-          通知经 ntfy App 推送（审批 / 完成 / 出错），在手机 ntfy 中订阅：
-          <div style={{ fontFamily: "var(--mono)", fontSize: 12, marginTop: 6, color: "var(--text)" }}>
-            agentlink-approval<span style={{ color: "var(--text-faint)" }}>（最高优先级）</span>
-            <br />
-            agentlink-task
-          </div>
-          <div style={{ fontSize: 11.5, marginTop: 8, color: "var(--text-faint)" }}>
-            开关在电脑端 ~/.agentlink/config.toml（[ntfy] enabled）
-          </div>
-        </div>
+        <PushSettings />
 
         <div className="section-label">安全</div>
         <Link to="/settings/audit" className="card" style={{ textDecoration: "none", color: "inherit", display: "block" }}>
@@ -91,12 +84,15 @@ export function Settings() {
         <div
           className="card"
           style={{ cursor: "pointer", color: "var(--red)", fontSize: 14 }}
-          onClick={() => {
-            if (confirm("解除配对并清除此设备上的 token？")) clearToken();
+          onClick={async () => {
+            if (!confirm("解除配对并清除此设备上的 token？")) return;
+            try { if (pushDeviceId()) await disablePush(); clearToken(); }
+            catch { setUnpairError("未能关闭此设备的通知，请联网后重试解除配对。"); }
           }}
         >
           解除配对
         </div>
+        {unpairError && <div role="alert">{unpairError}</div>}
 
         <div className="empty-note">AgentLink v0.1</div>
       </div>
