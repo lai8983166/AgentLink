@@ -52,6 +52,11 @@ describe("系统推送订阅", () => {
     expect(localStorage.getItem("agentlink-push-device")).toBe("d1");
     await disablePush(); expect(sub.unsubscribe).toHaveBeenCalledTimes(1); expect(localStorage.getItem("agentlink-push-device")).toBeNull();
   });
+  test("后台订阅失效后重开会续建浏览器订阅，不反复复用已过期入口", async () => {
+    reg.pushManager.getSubscription.mockResolvedValue(sub);
+    await enablePush(key, { renew: true });
+    expect(sub.unsubscribe).toHaveBeenCalledTimes(1); expect(reg.pushManager.subscribe).toHaveBeenCalledTimes(1);
+  });
   test("不响应的推送服务有等待上限，不报告发送成功", async () => {
     vi.useFakeTimers();
     const assertion = expect(boundedPush(new Promise(() => {}), "开通超时", 100)).rejects.toThrow("开通超时");

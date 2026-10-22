@@ -34,13 +34,13 @@ export async function inspectPush() {
   const sub = await boundedPush(reg.pushManager.getSubscription(), "无法读取通知订阅，请稍后重试。");
   return { ...config, active: !!sub && !!config.device && pushPermission() === "granted" && sameKey(sub, config.publicKey) };
 }
-export async function enablePush(publicKey: string) {
+export async function enablePush(publicKey: string, options: { renew?: boolean } = {}) {
   // 权限弹窗必须直接由点击触发，在第一个异步等待前调用。
   const permission = await boundedPush(Notification.requestPermission(), "通知授权未完成，请重试。");
   if (permission !== "granted") throw new Error("未获得通知权限。请在浏览器或系统设置中允许 AgentLink 通知后重试。");
   const reg = await registration();
   let sub = await boundedPush(reg.pushManager.getSubscription(), "无法读取通知订阅。");
-  if (sub && !sameKey(sub, publicKey)) { await sub.unsubscribe(); sub = null; }
+  if (sub && (options.renew || !sameKey(sub, publicKey))) { await sub.unsubscribe(); sub = null; }
   if (!sub) sub = await boundedPush(reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: publicKeyBytes(publicKey) }), "开通超时，手机可能无法连接浏览器推送服务；请检查网络后重试。");
   const subscription = sub.toJSON();
   if (!subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) throw new Error("浏览器返回的通知订阅不完整，请重试。");

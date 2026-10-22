@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PushConfigResponse } from "@agentlink/shared";
 import { api } from "../runtime";
-import { disablePush, enablePush, inspectPush, pushPermission, pushSupportError } from "../push-client";
+import { disablePush, enablePush, inspectPush, pushDeviceId, pushPermission, pushSupportError } from "../push-client";
 
 export function PushSettings() {
   const [support] = useState(pushSupportError);
@@ -29,7 +29,7 @@ export function PushSettings() {
     setBusy(true); setError(null); setNote(null);
     try {
       if (state.active || state.device) { await disablePush(); setState({ ...state, active: false, device: null }); setNote("已关闭此设备的任务通知"); }
-      else { setState(await enablePush(state.publicKey)); setNote("通知订阅已开启，请发送测试通知并确认手机实际收到。"); }
+      else { setState(await enablePush(state.publicKey, { renew: !!pushDeviceId() })); setNote("通知订阅已开启，请发送测试通知并确认手机实际收到。"); }
     } catch (e) { setError(e instanceof Error ? e.message : "通知设置失败，请重试"); }
     finally { setBusy(false); }
   }
@@ -59,9 +59,9 @@ export function PushSettings() {
       {note && <div role="status">{note}</div>}
       {error && <div role="alert" style={{ color: "var(--red)" }}>{error}</div>}
       {!support && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
-        <button className="btn" disabled={busy || !state} onClick={() => { void change(); }}>{state?.active || state?.device ? "关闭任务通知" : "开启任务通知"}</button>
-        <button className="btn ghost" disabled={busy || !state?.active} onClick={() => { void test(); }}>发送测试通知</button>
-        <button className="btn ghost" disabled={busy} onClick={() => { void load(); }}>重新检查</button>
+        <button className="btn" style={{ padding: "0 12px" }} disabled={busy || !state} onClick={() => { void change(); }}>{state?.active || state?.device ? "关闭任务通知" : "开启任务通知"}</button>
+        <button className="btn ghost" style={{ padding: "0 12px" }} disabled={busy || !state?.active} onClick={() => { void test(); }}>发送测试通知</button>
+        <button className="btn ghost" style={{ padding: "0 12px" }} disabled={busy} onClick={() => { void load(); }}>重新检查</button>
       </div>}
       <div style={{ color: "var(--text-faint)", fontSize: 11.5, marginTop: 8 }}>首次请实际测试锁屏和关闭页面后的通知。系统省电、浏览器推送服务及网络会影响送达。</div>
     </div>

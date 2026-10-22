@@ -5,6 +5,15 @@ import { PushStore, type PushJob } from "./push-store";
 
 export type PushSender = (subscription: PushSubscriptionInput, payload: string, options: webpush.RequestOptions) => Promise<unknown>;
 
+/** 库负责标准加密；fetch 的期限同时覆盖 DNS、连接与响应，且不跟随跨站重定向。 */
+export const sendWebPush: PushSender = async (subscription, payload, options) => {
+  const request = webpush.generateRequestDetails(subscription, payload, options);
+  const response = await fetch(request.endpoint, { method: request.method, headers: request.headers,
+    body: request.body ? new Uint8Array(request.body) : undefined, redirect: "error", signal: AbortSignal.timeout(10000) });
+  await response.body?.cancel().catch(() => {});
+  if (!response.ok) throw { statusCode: response.status };
+};
+
 /** 只允许浏览器厂商的 Web Push 入口，订阅接口不能成为任意 URL 请求器。 */
 export function validPushEndpoint(endpoint: string): boolean {
   try {
@@ -23,7 +32,8 @@ export class WebPushService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private syncTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
-  constructor(readonly store: PushStore, private readonly send: PushSender = webpush.sendNotification, private readonly now = Date.now) {
+  private recordFailures = 0;
+  constructor(readonly store: PushStore, private readonly send: PushSender = sendWebPush, private readonly now = Date.now) {
     this.keys = store.keys(webpush.generateVAPIDKeys);
     this.publicKey = this.keys.publicKey;
   }
@@ -33,18 +43,22 @@ export class WebPushService {
   }
   onEvent(e: SessionEvent | ListEvent): void {
     if (this.stopped) return;
+    try { this.recordEvent(e); }
+    catch { if (this.recordFailures++ < 3) console.warn("[push] 通知记录失败，不影响任务执行"); }
+  }
+  private recordEvent(e: SessionEvent | ListEvent): void {
     if ("summary" in e) {
       this.titles.set(e.summary.id, e.summary.title.slice(0, 100));
       if (this.titles.size > 1000) this.titles.delete(this.titles.keys().next().value!);
     } else if (e.type === "session.status") {
       if (this.statuses.get(e.sessionId) === e.status) return;
-      this.statuses.set(e.sessionId, e.status);
-      if (this.statuses.size > 1000) this.statuses.delete(this.statuses.keys().next().value!);
       this.store.taskStatus(e.sessionId, e.status, (eventId) => JSON.stringify({
         title: e.status === "error" ? "AgentLink · 任务出错" : "AgentLink · 任务完成",
         body: `${this.titles.get(e.sessionId) || `会话 ${e.sessionId.slice(0, 8)}`}：${e.status === "error" ? "本轮出错，点击查看" : "本轮已完成，点击查看结果"}`,
         url: `/${encodeURIComponent(e.sessionId)}`, tag: createHash("sha256").update(eventId).digest("hex").slice(0, 32),
       }), this.now());
+      this.statuses.set(e.sessionId, e.status);
+      if (this.statuses.size > 1000) this.statuses.delete(this.statuses.keys().next().value!);
       if (e.status === "done" || e.status === "error") void this.flush();
     }
   }
@@ -58,9 +72,9 @@ export class WebPushService {
     this.timer = setInterval(() => { void this.flush(); }, 2000); this.timer.unref?.();
     let syncing = false;
     const refresh = async () => {
-      if (!sync || syncing || !this.store.hasDevices()) return;
+      if (!sync || syncing) return;
       syncing = true;
-      try { await sync(); } catch { /* 电脑失联不等于任务完成 */ } finally { syncing = false; }
+      try { if (this.store.hasDevices()) await sync(); } catch { /* 电脑失联不等于任务完成 */ } finally { syncing = false; }
     };
     this.syncTimer = setInterval(() => { void refresh(); }, 30000); this.syncTimer.unref?.();
     void this.flush(); void refresh();

@@ -4,7 +4,7 @@ import { PushSettings } from "./PushSettings";
 import { disablePush, enablePush, inspectPush, pushSupportError } from "../push-client";
 import { api } from "../runtime";
 vi.mock("../runtime", () => ({ api: { pushTest: vi.fn() } }));
-vi.mock("../push-client", () => ({ disablePush: vi.fn(), enablePush: vi.fn(), inspectPush: vi.fn(), pushPermission: () => "granted", pushSupportError: vi.fn() }));
+vi.mock("../push-client", () => ({ disablePush: vi.fn(), enablePush: vi.fn(), inspectPush: vi.fn(), pushDeviceId: () => null, pushPermission: () => "granted", pushSupportError: vi.fn() }));
 const device = { id: "d1", lastAcceptedAt: null, lastError: null, pending: 0 };
 beforeEach(() => {
   vi.clearAllMocks(); vi.mocked(pushSupportError).mockReturnValue(null);
