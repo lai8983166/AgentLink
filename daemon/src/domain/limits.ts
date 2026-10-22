@@ -27,17 +27,16 @@ export class LimitsMonitor {
   snapshot(): LimitsState | null {
     const c = this.current;
     if (!c) return null;
-    // 过期窗口不再展示为"当前"（reset 时间已过 10 分钟且没有新数据 → 视为陈旧）
+    // 窗口身份固定：短窗口过期也不能用周窗口替换它。
     const now = Date.now() / 1000;
-    if (c.primary.resetsAt > now - 600) return c;
-    if (c.secondary && c.secondary.resetsAt > now - 600) return { primary: c.secondary, secondary: null, measuredAt: c.measuredAt };
+    if (c.primary.resetsAt > now || (c.secondary && c.secondary.resetsAt > now)) return c;
     return null;
   }
 
-  ingest(primary: RateLimitWindow, secondary: RateLimitWindow | null, measuredAt: number | null = null): void {
+  ingest(primary: RateLimitWindow, secondary: RateLimitWindow | null, measuredAt: number | null = Date.now()): void {
     const prev = this.current;
-    // 只前进：resetsAt 更新或百分比变化的才视为新数据（防旧文件尾读回退）
-    if (prev && primary.resetsAt === prev.primary.resetsAt && primary.usedPercent < prev.primary.usedPercent) {
+    // 用测量时间判断先后，官方修正后的用量下降也应接受。
+    if (prev?.measuredAt != null && (measuredAt == null || measuredAt < prev.measuredAt)) {
       return;
     }
     this.current = { primary, secondary, measuredAt };
@@ -45,7 +44,9 @@ export class LimitsMonitor {
       !prev ||
       primary.usedPercent !== prev.primary.usedPercent ||
       secondary?.usedPercent !== prev.secondary?.usedPercent ||
-      primary.resetsAt !== prev.primary.resetsAt
+      primary.resetsAt !== prev.primary.resetsAt ||
+      secondary?.resetsAt !== prev.secondary?.resetsAt ||
+      measuredAt !== prev.measuredAt
     ) {
       this.onChange({ primary, secondary, measuredAt });
     }
