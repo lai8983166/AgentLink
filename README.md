@@ -4,13 +4,14 @@
 
 - `daemon/` — PC 侧常驻进程（Bun + Hono + TS），桥接 codex app-server
 - `web/` — 手机端 PWA（React + Vite）
+- `mobile/` — 自用安卓 APK（复用 React 界面，Kotlin 后台通知，无 Google 服务依赖）
 - `shared/` — API 契约包（REST/WS/事件 zod schema，两端共用）
 - `design/` — UI 原型、设计笔记、codex 协议摸底实录
 - `openspec/` — 规格与变更管理
 
 ## 快速开始
 
-前置：Bun ≥ 1.4、Node ≥ 20、pnpm ≥ 10、codex CLI ≥ 0.160（已登录）。
+前置：Bun ≥ 1.4、Node ≥ 22、pnpm ≥ 10、codex CLI ≥ 0.160（已登录）。
 
 ```bash
 pnpm install          # 安装依赖
@@ -32,4 +33,5 @@ pnpm dev              # 启动 daemon :8787 → curl /api/v1/health
 - codex app-server 协议实录：`design/codex-appserver-notes.md`
 - VPS 外网部署：`docs/deploy-vps.md`（任务 9.x 提供）
 - 测试体系、真机验收与安全重启：[docs/testing.md](docs/testing.md)
+- 安卓 APK 安装、签名构建与后台通知测试：[mobile/README.md](mobile/README.md)
 - 变更流程：`openspec/`（OpenSpec，`/opsx:propose` 起新变更）

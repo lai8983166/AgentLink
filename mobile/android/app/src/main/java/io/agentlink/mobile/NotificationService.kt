@@ -81,6 +81,7 @@ class NotificationService : Service() {
     }
     private fun showTask(id: String, payload: JSONObject): Boolean {
         val manager = NotificationManagerCompat.from(this)
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false
         if (!manager.areNotificationsEnabled() || (Build.VERSION.SDK_INT >= 26 && getSystemService(NotificationManager::class.java).getNotificationChannel(TASKS)?.importance == NotificationManager.IMPORTANCE_NONE)) {
             state.message("系统已禁止任务通知，请在应用通知设置中开启")
             Thread.sleep(15000); return false
