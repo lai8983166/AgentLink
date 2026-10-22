@@ -86,12 +86,13 @@ async function build(reset: boolean) {
     state = { revision: 1, requests: [commandRequest(2)], status: "inProgress", items: [], approvalReject: false, sends: [], approvalMethods: [], delayedMessages: false, turns: [], ownerAvailable: true, ownerError: null, writerHeld: false };
   }
   const fake = new FakeCodexServer(); const bridge = new CodexBridge(fake); await bridge.start();
+  const notifications: Array<{ title: string; url: string; tag: string }> = [];
   fake.onTurnStart = (params) => {
     const threadId = params.threadId as string;
     fake.notify("thread/status/changed", { threadId, status: { type: "active", activeFlags: [] } });
     fake.notify("item/completed", { threadId, item: { type: "userMessage", id: crypto.randomUUID(), content: params.input } });
   };
-  fixture = createApp({ token, allowedRoots: [root], bridge, auditPath, pushSender: async () => {},
+  fixture = createApp({ token, allowedRoots: [root], bridge, auditPath, pushSender: async (_sub, payload) => { notifications.push(JSON.parse(payload)); },
     assertNoWriter: async () => { if (state.writerHeld) throw new DaemonError("SESSION_BUSY", "原会话仍被其他入口持有，请先关闭该会话"); },
     resumeSettings: async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }),
     desktopFactory: (bus, approvals, controls) => new DesktopSessionManager(bus, approvals, {
@@ -108,6 +109,7 @@ async function build(reset: boolean) {
     else if (action.type === "resumeConflict") fake.resumeError = "thread already has an active writer";
     else if (action.type === "fileApproval") { state.requests = [commandRequest(3, "fileChange")]; state.revision++; push(); }
     else if (action.type === "done") { state.status = "completed"; state.requests = []; state.revision++; push(); }
+    else if (action.type === "running") { state.status = "inProgress"; state.requests = []; state.revision++; push(); }
     else if (action.type === "delayMessages") state.delayedMessages = true;
     else if (action.type === "uncertainReceipt") fixture.controls.saveDelivery("old1", action.text, {
       clientMessageId: action.messageId, state: "uncertain", updatedAt: Date.now(), error: "ipc closed: thread-follower-start-turn",
@@ -140,7 +142,7 @@ async function build(reset: boolean) {
     }
     return c.json({ ok: true });
   });
-  fixture.app.post("/__test__/metrics", (c) => c.json({ sends: state.sends, approvalMethods: state.approvalMethods,
+  fixture.app.post("/__test__/metrics", (c) => c.json({ sends: state.sends, approvalMethods: state.approvalMethods, notifications,
     resumeCalls: fake.written.filter((line) => JSON.parse(line).method === "thread/resume").length,
     resumes: fake.written.map((line) => JSON.parse(line)).filter((m) => m.method === "thread/resume").map((m) => m.params),
     localSends: fake.written.map((line) => JSON.parse(line)).filter((m) => m.method === "turn/start").map((m) => m.params),
