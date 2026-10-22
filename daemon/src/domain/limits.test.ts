@@ -29,7 +29,7 @@ describe("LimitsMonitor（额度可见/限额告警）", () => {
     m.ingest(win(50), null, 1);
     m.ingest(win(50), null, 1); // 无变化
     expect(changes).toBe(1);
-    m.ingest(win(99.9), null); // 用尽
+    m.ingest(win(99.9), null); // 接近用尽仍不告警
     expect(exhausted).toEqual([]);
     m.ingest(win(100), null); // 仍然用尽、同窗口 → 不重复
     expect(exhausted).toEqual(["5h"]);

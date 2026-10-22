@@ -46,6 +46,8 @@ export class DesktopSessionManager {
       log?: (...a: unknown[]) => void;
       clientFactory?: () => IpcClient;
       summaryTimeoutMs?: number;
+      /** 自动化测试注入历史额度，避免扫描本机真实会话。 */
+      limitsReader?: typeof recentLimits;
       controls?: ControlStore;
     } = {},
   ) {
@@ -150,7 +152,7 @@ export class DesktopSessionManager {
     if (!this.limitsMonitor || this.limitsTimers.has(conversationId)) return;
     const poll = () => {
       if (!this.limitsMonitor?.needsHistoryFallback()) return;
-      const rl = recentLimits(conversationId);
+      const rl = (this.opts.limitsReader ?? recentLimits)(conversationId);
       if (rl) this.limitsMonitor?.ingest(rl.primary, rl.secondary, rl.measuredAt, { source: "history" });
     };
     poll();

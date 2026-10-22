@@ -94,7 +94,7 @@ async function build(reset: boolean) {
     assertNoWriter: async () => { if (state.writerHeld) throw new DaemonError("SESSION_BUSY", "原会话仍被其他入口持有，请先关闭该会话"); },
     resumeSettings: async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }),
     desktopFactory: (bus, approvals, controls) => new DesktopSessionManager(bus, approvals, {
-    controls, log: () => {}, clientFactory: () => new IpcClient(() => { const pipe = new TestPipe(); pipes.push(pipe); queueMicrotask(() => pipe.emit("connect")); return pipe; }, { callTimeoutMs: 300 }),
+    controls, log: () => {}, limitsReader: () => null, clientFactory: () => new IpcClient(() => { const pipe = new TestPipe(); pipes.push(pipe); queueMicrotask(() => pipe.emit("connect")); return pipe; }, { callTimeoutMs: 300 }),
   }) });
   await fixture.registry.start();
   fixture.app.post("/__test__/control", async (c) => {
