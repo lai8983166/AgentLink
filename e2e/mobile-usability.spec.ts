@@ -105,7 +105,7 @@ async function fixtureList(page: Page, count: number) {
       ? { status: 503, json: { error: { code: "UNAVAILABLE", message: "test offline" } } }
       : { json: { sessions: Array.from({ length: state.count }, (_, i) => listSession(i)) } });
   });
-  await page.route("**/api/v1/status", async (route) => {
+  await page.route("**/api/v1/status*", async (route) => {
     state.statuses++;
     await route.fulfill({ json: { rateLimits: null, connections: { desktop: "ready" } } });
   });

@@ -44,7 +44,7 @@ export class LimitsRefresh {
       const accountId = result && typeof result === "object" && "accountId" in result && typeof result.accountId === "string" ? result.accountId : null;
       this.monitor.ingest(limits.primary, limits.secondary, startedAt, { ...limits, source: "official", accountId });
     }).catch(() => {
-      if (generation === this.generation) this.monitor.markRefreshFailed();
+      if (generation === this.generation && (this.monitor.snapshot()?.measuredAt ?? 0) <= startedAt) this.monitor.markRefreshFailed();
     }).finally(() => {
       this.pending = null;
       if (this.rerun) { this.rerun = false; void this.refresh(true); }

@@ -409,4 +409,10 @@ body {
   transform: translate(2.5px, 2.5px);
   box-shadow: 1px 1px 0 var(--border);
 }
-:root .quota-status { margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--text-dim); font-weight: 400; }
+.quota-status {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  font-weight: 400;
+}

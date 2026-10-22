@@ -50,6 +50,15 @@ describe("官方账户额度读取", () => {
     expect(monitor.snapshot()?.primary?.usedPercent).toBe(30);
   });
 
+  test("旧请求失败不能把期间收到的成功推送标成失败", async () => {
+    const monitor = new LimitsMonitor(); const wait = deferred();
+    const refresh = new LimitsRefresh(monitor, { ready: true, accountRateLimitsRead: () => wait.promise }, () => 100);
+    const pending = refresh.refresh();
+    monitor.ingest(primary(30), secondary(69), 101);
+    wait.resolve(null); await pending;
+    expect(monitor.snapshot()?.refreshFailed).toBe(false);
+  });
+
   test("账户切换立即清空，忽略旧请求并重新读取新账户", async () => {
     const monitor = new LimitsMonitor(); const wait = deferred(); let calls = 0;
     const refresh = new LimitsRefresh(monitor, { ready: true, accountRateLimitsRead: () => ++calls === 1 ? wait.promise : Promise.resolve(response(3, "b")) }, () => 100);
