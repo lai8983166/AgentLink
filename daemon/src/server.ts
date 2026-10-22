@@ -24,6 +24,8 @@ import type { ResumeSettings } from "./codex/resume-settings";
 import { PushStore } from "./notify/push-store";
 import { WebPushService, type PushSender } from "./notify/web-push";
 import { createPushRouter } from "./routes/push";
+import { createNativePushRouter } from "./routes/native-push";
+import { cors } from "hono/cors";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
 
@@ -60,6 +62,8 @@ export function createApp(opts: {
 }): DaemonApp {
   const app = new Hono();
   const auth = { token: opts.token };
+  // APK 内置页面的固定本地来源；API 仍必须通过 Bearer 配对认证。
+  app.use("/api/*", cors({ origin: "https://localhost", allowHeaders: ["Authorization", "Content-Type"], allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
 
   // 健康检查：无需认证
   app.get(API.health, (c) => c.json({ ok: true, daemon: "agentlink", version: DAEMON_VERSION }));
@@ -105,6 +109,7 @@ export function createApp(opts: {
   );
 
   app.route("/", createPushRouter(push, auth));
+  app.route("/", createNativePushRouter(push, auth));
 
   // token 轮换（remote-access spec：轮换后旧 token 立即失效）
   app.post("/api/v1/admin/token/rotate", async (c) => {
