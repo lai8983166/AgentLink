@@ -10,12 +10,13 @@ const buildMetadata: Plugin = {
   },
 };
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   define: { __APP_BUILD__: JSON.stringify(appBuild) },
   plugins: [
     react(),
     buildMetadata,
     VitePWA({
+      disable: mode === "mobile",
       // Activate new caches for legacy installations; our own updater controls page reload.
       registerType: "autoUpdate",
       injectRegister: false,
@@ -55,4 +56,4 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
   },
-} as never);
+}) as never);

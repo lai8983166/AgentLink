@@ -1,0 +1,13 @@
+{
+  "name": "@agentlink/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "pnpm --filter @agentlink/web build:mobile && cap sync android",
+    "open": "cap open android",
+    "release": "pnpm sync && node scripts/release.mjs"
+  },
+  "dependencies": { "@capacitor/core": "^8.0.0", "@capacitor/android": "^8.0.0" },
+  "devDependencies": { "@capacitor/cli": "^8.0.0" }
+}

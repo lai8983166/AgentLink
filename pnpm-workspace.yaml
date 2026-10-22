@@ -2,3 +2,4 @@ packages:
   - daemon
   - web
   - shared
+  - mobile

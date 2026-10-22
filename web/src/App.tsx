@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useNavigate } from "react-router-dom";
+import { isAndroidApp, native, notificationPath } from "./native";
 import { useStore } from "./store";
 import { connectWs } from "./runtime";
 import { PairScreen } from "./pages/PairScreen";
@@ -10,6 +11,19 @@ import { Audit } from "./pages/Audit";
 
 export function App() {
   const token = useStore((s) => s.token);
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!token || !isAndroidApp()) return;
+    let disposed = false;
+    const visit = ({ path }: { path?: string }) => { const safe = path && notificationPath(path); if (!disposed && safe) navigate(safe); };
+    let remove: (() => void) | undefined;
+    const consume = () => { void native.consumeNavigation().then(visit).catch(() => {}); };
+    void native.addListener("navigation", consume).then((listener) => {
+      if (disposed) { void listener.remove(); return; }
+      remove = () => { void listener.remove(); }; consume();
+    }).catch(() => {});
+    return () => { disposed = true; remove?.(); };
+  }, [token, navigate]);
 
   useEffect(() => {
     if (token) return connectWs();

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isAndroidApp } from "./native";
 
 export interface AppUpdateState {
   build: string;
@@ -136,7 +137,7 @@ export function createAppUpdater(options: Options) {
 
 const updater = createAppUpdater({
   build,
-  workers: import.meta.env.PROD && "serviceWorker" in navigator ? navigator.serviceWorker : undefined,
+  workers: !isAndroidApp() && import.meta.env.PROD && "serviceWorker" in navigator ? navigator.serviceWorker : undefined,
   version: async () => {
     if (!import.meta.env.PROD) return build;
     const controller = new AbortController();
@@ -156,7 +157,7 @@ export const checkAppUpdate = updater.check;
 export const applyAppUpdate = updater.apply;
 
 export function startAppUpdates() {
-  if (!import.meta.env.PROD) return () => {};
+  if (!import.meta.env.PROD || isAndroidApp()) return () => {};
   const check = () => { if (document.visibilityState === "visible" && navigator.onLine) void updater.check(); };
   check();
   document.addEventListener("visibilitychange", check);

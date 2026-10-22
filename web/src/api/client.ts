@@ -24,7 +24,7 @@ export class ApiError extends Error {
 
 export class ApiClient {
   constructor(
-    private readonly baseUrl = "",
+    private readonly baseUrl: string | (() => string) = "",
     private readonly getToken: () => string | null,
     private readonly options: { timeoutMs?: number } = {},
   ) {}
@@ -34,7 +34,7 @@ export class ApiClient {
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 20000);
     try {
     const token = this.getToken();
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await fetch(`${typeof this.baseUrl === "function" ? this.baseUrl() : this.baseUrl}${path}`, {
       ...init,
       signal: controller.signal,
       headers: {

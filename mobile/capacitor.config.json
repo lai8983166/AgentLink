@@ -1,0 +1,8 @@
+{
+  "appId": "io.agentlink.mobile",
+  "appName": "AgentLink",
+  "webDir": "../web/dist-mobile",
+  "android": { "allowMixedContent": false },
+  "server": { "androidScheme": "https", "hostname": "localhost" },
+  "plugins": { "CapacitorHttp": { "enabled": false } }
+}
