@@ -89,14 +89,14 @@ export class JsonRpcConnection {
     }
   }
 
-  call<T = unknown>(method: string, params?: unknown): Promise<T> {
+  call<T = unknown>(method: string, params?: unknown, timeoutMs = this.opts.callTimeoutMs ?? 30000): Promise<T> {
     if (this.closed) return Promise.reject(new Error("connection closed"));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`json-rpc timeout: ${method}`));
-      }, this.opts.callTimeoutMs ?? 30000);
+      }, timeoutMs);
       this.pending.set(id, {
         method,
         timer,

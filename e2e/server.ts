@@ -78,7 +78,7 @@ function commandRequest(id: number, kind = "command") {
     params: { command: kind === "command" ? "echo E2E" : null, cwd: "F:/e2e", availableDecisions: ["accept", "decline"] } };
 }
 async function build(reset: boolean) {
-  fixture?.desktop?.shutdown(); fixture?.bridge.stop(); fixture?.audit.close(); fixture?.controls.close();
+  fixture?.limitsRefresh.stop(); fixture?.desktop?.shutdown(); fixture?.bridge.stop(); fixture?.audit.close(); fixture?.controls.close();
   if (reset) {
     pwaVersion = null;
     auditPath = join(root, String(++caseNumber), "audit.db");

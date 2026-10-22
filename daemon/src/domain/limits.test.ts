@@ -30,7 +30,7 @@ describe("LimitsMonitor（额度可见/限额告警）", () => {
     m.ingest(win(50), null, 1); // 无变化
     expect(changes).toBe(1);
     m.ingest(win(99.9), null); // 用尽
-    expect(exhausted).toEqual(["5h"]);
+    expect(exhausted).toEqual([]);
     m.ingest(win(100), null); // 仍然用尽、同窗口 → 不重复
     expect(exhausted).toEqual(["5h"]);
     m.ingest(win(100, 2000003600), null); // 新窗口（resetsAt 变化）→ 再通知
@@ -39,28 +39,28 @@ describe("LimitsMonitor（额度可见/限额告警）", () => {
   });
 
   test("周窗用尽也通知；旧数据不回退", () => {
-    m.ingest(win(80), win(100), 20);
+    m.ingest(win(80), { ...win(100), windowDurationMins: 10080 }, 20);
     expect(exhausted).toEqual(["week"]);
     m.ingest(win(30), win(40), 10);
-    expect(m.snapshot()?.primary.usedPercent).toBe(80);
+    expect(m.snapshot()?.primary?.usedPercent).toBe(80);
   });
 
-  test("snapshot：窗口过期后不再展示", () => {
+  test("过期窗口保留原始重置时间供客户端显示等待更新，不推算恢复", () => {
     m.ingest(win(50, 1), null); // 早已过期
-    expect(m.snapshot()).toBeNull();
+    expect(m.snapshot()?.primary?.resetsAt).toBe(1);
   });
 
   test("接受更新的官方下调，旧记录即使重置时间更晚也不能覆盖", () => {
     m.ingest(win(80), win(70), 20);
     m.ingest(win(30), win(40), 30);
     m.ingest(win(90, 2000000002), win(90), 10);
-    expect(m.snapshot()?.primary.usedPercent).toBe(30);
+    expect(m.snapshot()?.primary?.usedPercent).toBe(30);
     expect(m.snapshot()?.secondary?.usedPercent).toBe(40);
   });
 
   test("短窗口过期但周窗口有效时保留窗口身份", () => {
     m.ingest(win(100, Date.now() / 1000 - 1), { ...win(68), windowDurationMins: 10080 });
-    expect(m.snapshot()?.primary.windowDurationMins).toBe(300);
+    expect(m.snapshot()?.primary?.windowDurationMins).toBe(300);
     expect(m.snapshot()?.secondary?.usedPercent).toBe(68);
   });
 
@@ -126,10 +126,10 @@ describe("rollout 限额尾读", () => {
 
 describe("parseRateLimits（命名防御）", () => {
   test("snake_case / camelCase / 缺 secondary", () => {
-    expect(parseRateLimits({ primary: { used_percent: 10, window_minutes: 300, resets_at: 1 } })?.primary.usedPercent).toBe(10);
-    expect(parseRateLimits({ primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 1 } })?.primary.usedPercent).toBe(10);
+    expect(parseRateLimits({ primary: { used_percent: 10, window_minutes: 300, resets_at: 1 } })?.primary?.usedPercent).toBe(10);
+    expect(parseRateLimits({ primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 1 } })?.primary?.usedPercent).toBe(10);
     expect(parseRateLimits({ primary: { used_percent: 10, window_minutes: 300, resets_at: 1 }, secondary: { usedPercent: 20, windowDurationMins: 10080, resetsAt: 2 } })?.secondary?.usedPercent).toBe(20);
-    expect(parseRateLimits({ secondary: { used_percent: 20, window_minutes: 1, resets_at: 2 } })).toBeNull(); // 无 primary
+    expect(parseRateLimits({ secondary: { used_percent: 20, window_minutes: 1, resets_at: 2 } })?.primary).toBeNull();
     expect(parseRateLimits(null)).toBeNull();
   });
 });

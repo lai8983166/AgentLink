@@ -13,6 +13,7 @@ import type { ApprovalService } from "../domain/approvals";
 import type { AuditStore } from "../domain/audit";
 import type { FsService } from "../domain/fs";
 import { DAEMON_VERSION } from "../server-version";
+import type { RateLimit } from "@agentlink/shared";
 
 /** REST API（任务 5.1）：Bearer 认证 + 错误 envelope */
 
@@ -25,7 +26,8 @@ export interface ApiDeps {
   audit: AuditStore;
   fs: FsService;
   /** 账户限额（状态 pill 数据源；缺省时 rateLimits 为 null） */
-  limits?: { snapshot(): { primary: { resetsAt: number }; secondary: unknown } | null };
+  limits?: { snapshot(): RateLimit | null };
+  limitsRefresh?: { refresh(force?: boolean): Promise<void> };
   connectionHealth?: () => { appServer: string; desktop: string; lastDesktopSyncAt: number | null };
   desktop?: {
     observe(id: string, mode?: "observe" | "takeover"): Promise<void>;
@@ -78,8 +80,10 @@ export function createApiRouter(deps: ApiDeps): Hono {
   // 认证只作用于 /api/v1/*，不影响静态资源与 SPA fallback
   api.use("/api/v1/*", authMiddleware(deps.auth ?? { token: deps.token }));
 
-  api.get(API.status, (c) =>
-    c.json({
+  api.get(API.status, async (c) => {
+    c.header("Cache-Control", "no-store");
+    await deps.limitsRefresh?.refresh(c.req.query("refreshLimits") === "1");
+    return c.json({
       daemonVersion: DAEMON_VERSION,
       mode: c.req.header("Host")?.startsWith("127.0.0.1") || c.req.header("Host")?.startsWith("localhost")
         ? "local"
@@ -88,8 +92,8 @@ export function createApiRouter(deps: ApiDeps): Hono {
       rateLimits: deps.limits?.snapshot() ?? null,
       pendingApprovals: 0,
       connections: deps.connectionHealth?.(),
-    }),
-  );
+    });
+  });
 
   api.get(API.sessions, async (c) => c.json({ sessions: await deps.registry.list() }));
   api.get("/api/v1/admin/restart-readiness", (c) => c.json(deps.registry.restartReadiness()));

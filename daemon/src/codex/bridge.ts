@@ -132,6 +132,11 @@ export class CodexBridge {
 
   /* ============ 域操作（映射 shared 契约） ============ */
 
+  /** 账户级只读请求，不加载或接管任何会话。 */
+  async accountRateLimitsRead(): Promise<unknown> {
+    return this.rpc.call(CodexMethod.accountRateLimitsRead, undefined, 5000);
+  }
+
   async threadStart(opts: {
     cwd: string;
     approvalPolicy: CodexApprovalPolicy;

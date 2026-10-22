@@ -53,12 +53,19 @@ export const RateLimitWindow = z.object({
 });
 export type RateLimitWindow = z.infer<typeof RateLimitWindow>;
 
-/** 账户限额：primary=5 小时窗，secondary=周窗 */
+/** 账户限额；窗口长度以服务端数据为准，缺失与过期均不能推算为已恢复。 */
 export const RateLimits = z.object({
-  primary: RateLimitWindow,
+  primary: RateLimitWindow.nullable(),
   secondary: RateLimitWindow.nullable(),
   /** 数据测量时刻（epoch ms；快照值与桌面实时衰减显示存在小时级漂移，标注以示诚实） */
   measuredAt: z.number().nullable().default(null),
+  source: z.enum(["official", "notification", "history"]).optional(),
+  limitId: z.string().nullable().optional(),
+  limitName: z.string().nullable().optional(),
+  rateLimitReachedType: z.string().nullable().optional(),
+  refreshFailed: z.boolean().optional(),
+  /** 后台状态修订时间，包括刷新失败；用于 HTTP/WS 响应排序。 */
+  updatedAt: z.number().optional(),
 });
 export const RateLimit = RateLimits;
 export type RateLimit = z.infer<typeof RateLimit>;

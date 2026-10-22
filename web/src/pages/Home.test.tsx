@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import type { ListEvent, SessionListResponse, SessionSummary } from "@agentlink/shared";
+import type { ListEvent, SessionListResponse, SessionSummary, StatusResponse, RateLimit } from "@agentlink/shared";
 import { api } from "../runtime";
 import { Home } from "./Home";
 
@@ -78,6 +78,7 @@ describe("首页手动刷新", () => {
     expect(screen.getByRole("status").textContent).toBe("刷新中…");
     await waitFor(() => expect(api.sessions).toHaveBeenCalledTimes(2));
     expect(api.status).toHaveBeenCalledTimes(2);
+    expect(api.status).toHaveBeenLastCalledWith(true);
     await act(async () => { resolve({ sessions: [summary("running", 3)] }); });
     expect(await screen.findByText("运行中")).toBeTruthy();
     expect(await screen.findByText("已刷新")).toBeTruthy();
@@ -112,5 +113,23 @@ describe("首页手动刷新", () => {
     expect(await screen.findByText("已刷新")).toBeTruthy();
     expect(api.sessions).toHaveBeenCalledTimes(3);
     expect(api.status).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("首页额度乱序恢复", () => {
+  test("读取期间推送的新额度不会被慢 HTTP 响应覆盖", async () => {
+    vi.mocked(api.sessions).mockReset().mockResolvedValue({ sessions: [] });
+    const now = Date.now();
+    const limits: RateLimit = { primary: { usedPercent: 27, windowDurationMins: 300, resetsAt: now / 1000 + 3600 }, secondary: null, measuredAt: now, updatedAt: now };
+    let resolve!: (value: StatusResponse) => void;
+    vi.mocked(api.status).mockReset().mockResolvedValueOnce({ rateLimits: limits } as StatusResponse);
+    mount(); await screen.findByText(/5 小时剩余 73%/);
+    vi.mocked(api.status).mockReturnValueOnce(new Promise((r) => { resolve = r; }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新会话" }));
+    await waitFor(() => expect(api.status).toHaveBeenCalledTimes(2));
+    act(() => events.sink?.({ type: "account.limits", sessionId: "__all__", seq: 1, at: now + 1, limits: { ...limits, primary: { ...limits.primary!, usedPercent: 30 }, updatedAt: now + 1 } }));
+    await act(async () => { resolve({ rateLimits: limits } as StatusResponse); });
+    expect(screen.getByTestId("quota-status").textContent).toContain("剩余 70%");
+    expect(screen.getByTestId("quota-status").textContent).not.toContain("剩余 73%");
   });
 });

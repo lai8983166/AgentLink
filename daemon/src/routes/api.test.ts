@@ -50,6 +50,19 @@ async function setup() {
 /* ============ 5.1 REST：认证 + 错误 envelope ============ */
 
 describe("REST API", () => {
+  test("状态从官方账户读取额度并禁用缓存，手动刷新绕过短缓存", async () => {
+    const { fake, app, authed } = await setup();
+    const limits = { primary: { usedPercent: 27, windowDurationMins: 300, resetsAt: 2000000000 }, secondary: { usedPercent: 68, windowDurationMins: 10080, resetsAt: 2000500000 }, limitId: "codex" };
+    fake.rateLimitsResponse = { rateLimits: limits };
+    const res = await app.request("/api/v1/status", { headers: authed });
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect((await res.json()).rateLimits).toMatchObject({ ...limits, source: "official" });
+    fake.rateLimitsResponse = { rateLimits: { ...limits, secondary: { ...limits.secondary, usedPercent: 69 } } };
+    const again = await app.request("/api/v1/status?refreshLimits=1", { headers: authed });
+    expect((await again.json()).rateLimits.secondary.usedPercent).toBe(69);
+    expect(fake.written.filter((line) => JSON.parse(line).method === "account/rateLimits/read")).toHaveLength(2);
+    expect(fake.written.some((line) => ["turn/start", "thread/resume", "thread/start"].includes(JSON.parse(line).method))).toBe(false);
+  });
   test("回执核对明确禁用缓存，没有记录时返回 null 而不伪造未接收结论", async () => {
     const { app, authed } = await setup();
     const response = await app.request("/api/v1/sessions/old1/messages/unknown", { headers: authed });

@@ -10,7 +10,7 @@ async function main() {
   keepAlive(cfg.keepAlive);
 
   const bridge = new CodexBridge(createRealTransportFactory());
-  const { app, registry } = createApp({
+  const { app, registry, limitsRefresh } = createApp({
     token: cfg.token,
     allowedRoots: cfg.allowedRoots,
     bridge,
@@ -34,8 +34,10 @@ async function main() {
 
   // codex 子进程就绪后再拉会话列表；失败不阻塞 HTTP 服务
   await registry.start();
+  limitsRefresh.start();
   bridge
     .start()
+    .then(() => limitsRefresh.refresh(true))
     .catch((e) => {
       console.error("[daemon] codex bridge 启动失败（将自动重试）:", e.message);
     });
