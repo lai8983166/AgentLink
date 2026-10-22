@@ -78,7 +78,8 @@ function commandRequest(id: number, kind = "command") {
     params: { command: kind === "command" ? "echo E2E" : null, cwd: "F:/e2e", availableDecisions: ["accept", "decline"] } };
 }
 async function build(reset: boolean) {
-  fixture?.limitsRefresh.stop(); fixture?.desktop?.shutdown(); fixture?.bridge.stop(); fixture?.audit.close(); fixture?.controls.close();
+  fixture?.push.stop(); fixture?.limitsRefresh.stop(); fixture?.desktop?.shutdown(); fixture?.bridge.stop(); fixture?.audit.close(); fixture?.controls.close();
+  await fixture?.push.close();
   if (reset) {
     pwaVersion = null;
     auditPath = join(root, String(++caseNumber), "audit.db");
@@ -90,7 +91,7 @@ async function build(reset: boolean) {
     fake.notify("thread/status/changed", { threadId, status: { type: "active", activeFlags: [] } });
     fake.notify("item/completed", { threadId, item: { type: "userMessage", id: crypto.randomUUID(), content: params.input } });
   };
-  fixture = createApp({ token, allowedRoots: [root], bridge, auditPath,
+  fixture = createApp({ token, allowedRoots: [root], bridge, auditPath, pushSender: async () => {},
     assertNoWriter: async () => { if (state.writerHeld) throw new DaemonError("SESSION_BUSY", "原会话仍被其他入口持有，请先关闭该会话"); },
     resumeSettings: async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }),
     desktopFactory: (bus, approvals, controls) => new DesktopSessionManager(bus, approvals, {

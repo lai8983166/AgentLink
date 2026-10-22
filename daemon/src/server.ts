@@ -21,6 +21,9 @@ import { randomUUID } from "node:crypto";
 import { ControlStore } from "./domain/control-store";
 import { configDir } from "./config";
 import type { ResumeSettings } from "./codex/resume-settings";
+import { PushStore } from "./notify/push-store";
+import { WebPushService, type PushSender } from "./notify/web-push";
+import { createPushRouter } from "./routes/push";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
 
@@ -34,6 +37,7 @@ export interface DaemonApp {
   auth: { token: string };
   controls: ControlStore;
   limitsRefresh: LimitsRefresh;
+  push: WebPushService;
   desktop?: DesktopSessionManager;
 }
 
@@ -49,6 +53,8 @@ export function createApp(opts: {
   resumeSettings?: (id: string) => Promise<ResumeSettings>;
   desktopFactory?: (bus: SessionEventBus, approvals: ApprovalService, controls: ControlStore) => DesktopSessionManager;
   ntfy?: NtfyConfig;
+  /** 测试传输注入，禁止自动化向真实手机或外部推送服务发消息。 */
+  pushSender?: PushSender;
   /** 轮换后持久化回调（写配置文件） */
   onTokenRotate?: (newToken: string) => void;
 }): DaemonApp {
@@ -65,6 +71,8 @@ export function createApp(opts: {
   const fs = new FsService(opts.allowedRoots);
   const controls = new ControlStore(opts.auditPath ? `${opts.auditPath}.controls` : join(configDir(), "controls.db"));
   const registry = new SessionRegistry(opts.bridge, bus, approvals, fs, controls, opts.assertNoWriter, opts.resumeSettings);
+  const push = new WebPushService(new PushStore(opts.auditPath ? `${opts.auditPath}.push` : join(configDir(), "push.db")), opts.pushSender);
+  bus.tap((e) => push.onEvent(e));
 
   // 账户限额（app-server 通知 + 桌面会话 rollout 尾读）：状态 pill / 用尽告警
   const limits = new LimitsMonitor();
@@ -96,12 +104,15 @@ export function createApp(opts: {
       connectionHealth: () => ({ appServer: opts.bridge.ready ? "ready" : "disconnected", desktop: desktop?.connectionHealth().state ?? "disabled", lastDesktopSyncAt: desktop?.connectionHealth().lastSyncAt ?? null }) }),
   );
 
+  app.route("/", createPushRouter(push, auth));
+
   // token 轮换（remote-access spec：轮换后旧 token 立即失效）
   app.post("/api/v1/admin/token/rotate", async (c) => {
     if (c.req.header("Authorization") !== `Bearer ${auth.token}`) {
       return c.json({ error: { code: "UNAUTHORIZED", message: "认证失败" } }, 401);
     }
     auth.token = randomUUID().replace(/-/g, "");
+    push.store.revokeAll();
     opts.onTokenRotate?.(auth.token);
     return c.json({ token: auth.token });
   });
@@ -161,7 +172,7 @@ export function createApp(opts: {
     });
   }
 
-  return { app, registry, approvals, audit, controls, desktop, bridge: opts.bridge, auth, limitsRefresh };
+  return { app, registry, approvals, audit, controls, desktop, bridge: opts.bridge, auth, limitsRefresh, push };
 }
 
 /** serveStatic 的 root 相对于进程 CWD，这里换成相对 import 路径的 posix 形式 */
