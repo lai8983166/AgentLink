@@ -7,6 +7,8 @@ import { KeyboardDiagnostics } from "../components/KeyboardDiagnostics";
 import { PushSettings } from "../components/PushSettings";
 import { disablePush, pushDeviceId } from "../push-client";
 import { useState } from "react";
+import { isAndroidApp, native, serverBase } from "../native";
+import { NativePushSettings } from "../components/NativePushSettings";
 
 /** 设置页（任务 7.7）：连接状态 / 通知说明 / 审计入口 / 解除配对 */
 export function Settings() {
@@ -53,12 +55,14 @@ export function Settings() {
         <div className="section-label">应用版本</div>
         <div className="card" style={{ cursor: "default", fontSize: 12, lineHeight: 1.7 }}>
           <div>当前前端版本：<span data-testid="app-build">{update.build}</span></div>
-          <div style={{ color: "var(--text-dim)", overflowWrap: "anywhere" }}>访问地址：{location.origin}</div>
+          <div style={{ color: "var(--text-dim)", overflowWrap: "anywhere" }}>访问地址：{serverBase() || location.origin}</div>
+          {isAndroidApp() ? <div>APK 内置界面，更新请安装新版 APK。</div> : <>
           <div style={{ color: "var(--text-dim)" }}>浏览器和桌面入口可在此核对版本与地址。</div>
           <div role="status" style={{ margin: "8px 0" }}>
             {update.applying ? "正在更新页面…" : update.checking ? "检查更新中…" : update.error ??
               (update.available ? "有新版本可用，更新会重新加载页面" : update.checked ? "当前已是最新版本" : "尚未检查更新")}
           </div>
+          </>}
           <div style={{ display: "flex", gap: 10 }}>
             <button className="btn ghost" style={{ flex: 1 }} disabled={update.checking || update.applying} onClick={() => { void checkAppUpdate(); }}>检查更新</button>
             {update.available && <button className="btn" style={{ flex: 1 }} disabled={update.checking || update.applying} onClick={() => { void applyAppUpdate(); }}>更新页面</button>}
@@ -66,7 +70,7 @@ export function Settings() {
         </div>
 
         <KeyboardDiagnostics />
-        <PushSettings />
+        {isAndroidApp() ? <NativePushSettings /> : <PushSettings />}
 
         <div className="section-label">安全</div>
         <Link to="/settings/audit" className="card" style={{ textDecoration: "none", color: "inherit", display: "block" }}>
@@ -86,7 +90,7 @@ export function Settings() {
           style={{ cursor: "pointer", color: "var(--red)", fontSize: 14 }}
           onClick={async () => {
             if (!confirm("解除配对并清除此设备上的 token？")) return;
-            try { if (pushDeviceId()) await disablePush(); clearToken(); }
+            try { if (isAndroidApp()) await native.stop(); else if (pushDeviceId()) await disablePush(); clearToken(); }
             catch { setUnpairError("未能关闭此设备的通知，请联网后重试解除配对。"); }
           }}
         >

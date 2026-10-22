@@ -8,6 +8,13 @@ playwright-report/
 test-results/
 build/
 *.log
+dist-mobile/
+.gradle/
+local.properties
+*.jks
+*.keystore
+keystore.properties
+mobile/release/
 
 # 系统杂物
 .DS_Store

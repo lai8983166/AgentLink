@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <!-- 仅供模拟器的本地假服务测试；release 始终禁止明文连接。 -->
+    <application android:usesCleartextTraffic="true" tools:replace="android:usesCleartextTraffic" />
+</manifest>
