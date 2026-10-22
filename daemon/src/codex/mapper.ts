@@ -1,4 +1,4 @@
-import type { RateLimitWindow, SessionStatus, ToolKind } from "@agentlink/shared";
+import type { RateLimit, RateLimitWindow, SessionStatus, ToolKind } from "@agentlink/shared";
 import {
   CODEX_NOISE_METHODS,
   type CodexApprovalParams,
@@ -14,6 +14,7 @@ import {
  */
 
 export type MappedFact =
+  | { kind: "accountChanged"; threadId: string }
   | { kind: "threadStatus"; threadId: string; status: SessionStatus }
   | { kind: "threadStarted"; threadId: string; cwd: string | null }
   | { kind: "threadName"; threadId: string; name: string }
@@ -36,8 +37,8 @@ export type MappedFact =
   | { kind: "queueChanged"; threadId: string; queued: number }
   | { kind: "patchUpdated"; threadId: string; itemId: string; patch: string | null }
   | { kind: "turnCompleted"; threadId: string; error: string | null }
-  | { kind: "tokenUsage"; threadId: string; totalTokens: number; inputTokens: number; cachedInputTokens: number; outputTokens: number; rateLimits: { primary: RateLimitWindow; secondary: RateLimitWindow | null } | null }
-  | { kind: "accountRateLimits"; threadId: string; rateLimits: { primary: RateLimitWindow; secondary: RateLimitWindow | null } }
+  | { kind: "tokenUsage"; threadId: string; totalTokens: number; inputTokens: number; cachedInputTokens: number; outputTokens: number; rateLimits: ParsedRateLimits | null }
+  | { kind: "accountRateLimits"; threadId: string; rateLimits: ParsedRateLimits }
   | {
       kind: "approvalRequest";
       rpcId: number | string;
@@ -60,7 +61,8 @@ function num(v: unknown): number | null {
 }
 
 /** rate_limits 防御解析（rollout/通知实测 snake_case，部分通知 camelCase） */
-export function parseRateLimits(v: unknown): { primary: RateLimitWindow; secondary: RateLimitWindow | null } | null {
+export type ParsedRateLimits = Pick<RateLimit, "primary" | "secondary" | "limitId" | "limitName" | "rateLimitReachedType">;
+export function parseRateLimits(v: unknown): ParsedRateLimits | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   const win = (x: unknown): RateLimitWindow | null => {
@@ -69,12 +71,22 @@ export function parseRateLimits(v: unknown): { primary: RateLimitWindow; seconda
     const used = num(w.used_percent) ?? num(w.usedPercent);
     const mins = num(w.window_minutes) ?? num(w.windowMinutes) ?? num(w.windowDurationMins);
     const resets = num(w.resets_at) ?? num(w.resetsAt);
-    if (used == null || mins == null || resets == null) return null;
+    if (used == null || mins == null || resets == null || used < 0 || used > 100 || mins <= 0 || resets <= 0) return null;
     return { usedPercent: used, windowDurationMins: mins, resetsAt: resets };
   };
   const primary = win(o.primary);
-  if (!primary) return null;
-  return { primary, secondary: win(o.secondary) };
+  const secondary = win(o.secondary);
+  if (!primary && !secondary) return null;
+  return { primary, secondary, limitId: str(o.limitId) ?? str(o.limit_id), limitName: str(o.limitName) ?? str(o.limit_name), rateLimitReachedType: str(o.rateLimitReachedType) ?? str(o.rate_limit_reached_type) };
+}
+
+/** 只读取 Codex 主额度组，其他模型额度不能覆盖该组。 */
+export function parseCodexRateLimits(v: unknown): ParsedRateLimits | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const buckets = o.rateLimitsByLimitId as Record<string, unknown> | undefined;
+  const parsed = parseRateLimits(buckets?.codex ?? o.rateLimits ?? o.rate_limits ?? o);
+  return parsed && (!parsed.limitId || parsed.limitId === "codex") ? parsed : null;
 }
 
 function statusFromThreadStatus(s: CodexThreadStatus | undefined): SessionStatus | null {
@@ -114,11 +126,12 @@ function textFromContent(content: unknown): string {
 }
 
 export function mapNotification(n: CodexNotification): MappedFact | null {
+  if (n.method === "account/updated") return { kind: "accountChanged", threadId: "" };
   if (CODEX_NOISE_METHODS.has(n.method)) return null;
   const p = (n.params ?? {}) as Record<string, unknown>;
   // 账户级通知（无 threadId）：在 threadId 守卫前拦截
   if (n.method === "account/rateLimits/updated") {
-    const rl = parseRateLimits(p.rateLimits ?? p.rate_limits ?? (p as Record<string, unknown>));
+    const rl = parseCodexRateLimits(p);
     if (rl) return { kind: "accountRateLimits", threadId: "", rateLimits: rl };
     return null;
   }

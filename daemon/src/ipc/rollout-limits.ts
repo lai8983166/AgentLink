@@ -7,7 +7,7 @@ import type { RateLimitWindow } from "@agentlink/shared";
  * rollout 文件限额尾读（桌面会话的额度来源）：
  * 桌面端干活时把 token_usage_record（含 rate_limits 双窗口）持续写进
  * ~/.codex/sessions/YYYY/MM/DD/rollout-*-<conversationId>.jsonl——IPC 快照不含限额，
- * 这是桌面驱动场景下唯一的实时来源。只读文件尾部，路径按会话 ID 缓存。
+ * 仅作为官方额度暂不可读时的历史来源。只读文件尾部，不代表当前额度。
  */
 
 const rolloutCache = new Map<string, string | null>();
@@ -46,7 +46,7 @@ function parseWindow(v: unknown): RateLimitWindow | null {
   const used = num(o.used_percent) ?? num(o.usedPercent);
   const mins = num(o.window_minutes) ?? num(o.windowMinutes) ?? num(o.windowDurationMins);
   const resets = num(o.resets_at) ?? num(o.resetsAt);
-  if (used == null || mins == null || resets == null) return null;
+  if (used == null || mins == null || resets == null || used < 0 || used > 100 || mins <= 0 || resets <= 0) return null;
   return { usedPercent: used, windowDurationMins: mins, resetsAt: resets };
 }
 
@@ -74,8 +74,10 @@ export function tailRateLimits(
         const rec = JSON.parse(l) as Record<string, unknown>;
         const payload = (rec.payload ?? rec) as Record<string, unknown>;
         const rl = (payload.rate_limits ?? rec.rate_limits ?? payload.rateLimits) as
-          | { primary?: unknown; secondary?: unknown }
+          | { primary?: unknown; secondary?: unknown; limit_id?: unknown; limitId?: unknown }
           | undefined;
+        const limitId = rl?.limitId ?? rl?.limit_id;
+        if (limitId && limitId !== "codex") continue;
         if (rl && parseWindow(rl.primary)) {
           last = rl;
           const ts = rec.timestamp;

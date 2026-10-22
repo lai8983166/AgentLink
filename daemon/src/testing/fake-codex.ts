@@ -4,6 +4,7 @@ import type { CodexTransport, CodexTransportFactory } from "../codex/process";
 export class FakeCodexServer implements CodexTransportFactory {
   written: string[] = [];
   resumeError: string | null = null;
+  rateLimitsResponse: unknown = null;
   onTurnStart?: (params: Record<string, unknown>) => void;
   private onData: ((c: string) => void) | null = null;
 
@@ -24,6 +25,7 @@ export class FakeCodexServer implements CodexTransportFactory {
     if (typeof msg.id === "number" && msg.method) {
       const results: Record<string, unknown> = {
         initialize: { userAgent: "fake" },
+        "account/rateLimits/read": this.rateLimitsResponse,
         "thread/start": { thread: { id: "t1", environments: [{ cwd: "F:/x" }] } },
         "thread/list": {
           data: [

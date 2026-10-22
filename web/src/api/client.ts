@@ -54,8 +54,8 @@ export class ApiClient {
     } finally { clearTimeout(timer); }
   }
 
-  status() {
-    return this.request<StatusResponse>("/api/v1/status");
+  status(refreshLimits = false) {
+    return this.request<StatusResponse>(`/api/v1/status${refreshLimits ? "?refreshLimits=1" : ""}`, { cache: "no-store" });
   }
   sessions() {
     return this.request<SessionListResponse>("/api/v1/sessions");

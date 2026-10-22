@@ -7,6 +7,7 @@
 /** 客户端 → app-server 方法（v0 用到的子集） */
 export const CodexMethod = {
   initialize: "initialize",
+  accountRateLimitsRead: "account/rateLimits/read",
   threadStart: "thread/start",
   threadList: "thread/list",
   threadResume: "thread/resume",

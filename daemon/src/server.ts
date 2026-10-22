@@ -12,6 +12,7 @@ import { AuditStore } from "./domain/audit";
 import { ApprovalService } from "./domain/approvals";
 import { SessionRegistry } from "./domain/sessions";
 import { LimitsMonitor } from "./domain/limits";
+import { LimitsRefresh } from "./domain/limits-refresh";
 import { FsService } from "./domain/fs";
 import { DesktopSessionManager } from "./ipc/desktop-manager";
 import { NtfyGateway, type NtfyConfig } from "./notify/ntfy";
@@ -32,6 +33,7 @@ export interface DaemonApp {
   bridge: CodexBridge;
   auth: { token: string };
   controls: ControlStore;
+  limitsRefresh: LimitsRefresh;
   desktop?: DesktopSessionManager;
 }
 
@@ -68,6 +70,11 @@ export function createApp(opts: {
   const limits = new LimitsMonitor();
   limits.onChange = (l) => bus.publishList({ type: "account.limits", limits: l });
   registry.setLimitsMonitor(limits);
+  const limitsRefresh = new LimitsRefresh(limits, opts.bridge);
+  opts.bridge.onFact((fact) => {
+    if (fact.kind === "accountChanged") { limitsRefresh.invalidate(); void limitsRefresh.refresh(true); }
+  });
+  opts.bridge.onRestart(() => limitsRefresh.invalidate());
 
   // 桌面 IPC follower（任务 3.1）：观察/接管桌面持有会话
   const desktop = opts.desktop === false ? undefined : opts.desktopFactory?.(bus, approvals, controls) ?? new DesktopSessionManager(bus, approvals, {
@@ -85,7 +92,7 @@ export function createApp(opts: {
   // REST
   app.route(
     "/",
-    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth, desktop, limits,
+    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth, desktop, limits, limitsRefresh,
       connectionHealth: () => ({ appServer: opts.bridge.ready ? "ready" : "disconnected", desktop: desktop?.connectionHealth().state ?? "disabled", lastDesktopSyncAt: desktop?.connectionHealth().lastSyncAt ?? null }) }),
   );
 
@@ -154,7 +161,7 @@ export function createApp(opts: {
     });
   }
 
-  return { app, registry, approvals, audit, controls, desktop, bridge: opts.bridge, auth };
+  return { app, registry, approvals, audit, controls, desktop, bridge: opts.bridge, auth, limitsRefresh };
 }
 
 /** serveStatic 的 root 相对于进程 CWD，这里换成相对 import 路径的 posix 形式 */

@@ -149,8 +149,9 @@ export class DesktopSessionManager {
   private startLimitsPolling(conversationId: string): void {
     if (!this.limitsMonitor || this.limitsTimers.has(conversationId)) return;
     const poll = () => {
+      if (!this.limitsMonitor?.needsHistoryFallback()) return;
       const rl = recentLimits(conversationId);
-      if (rl) this.limitsMonitor?.ingest(rl.primary, rl.secondary, rl.measuredAt);
+      if (rl) this.limitsMonitor?.ingest(rl.primary, rl.secondary, rl.measuredAt, { source: "history" });
     };
     poll();
     this.limitsTimers.set(conversationId, setInterval(poll, 60_000));

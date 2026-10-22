@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ListEvent, SessionSummary, SessionListResponse } from "@agentlink/shared";
+import type { ListEvent, SessionSummary, SessionListResponse, StatusResponse } from "@agentlink/shared";
 import { api, ws } from "../runtime";
 import { STATUS_ORDER, useStore } from "../store";
 import { NewTaskSheet } from "../components/NewTaskSheet";
@@ -9,6 +9,8 @@ import { useEffect } from "react";
 import { mergeSessionList, mergeSessionSummary } from "../session-cache";
 import { usePullToRefresh } from "../pull-to-refresh";
 import { UpdateNotice } from "../components/UpdateNotice";
+import { QuotaStatus } from "../components/QuotaStatus";
+import { mergeQuota } from "../quota";
 
 /** 电脑上正被其他入口使用的会话排在运行中之后、已完成之前 */
 function effectiveOrder(s: SessionSummary): number {
@@ -37,9 +39,20 @@ export function Home() {
   });
   const statusQ = useQuery({
     queryKey: ["status"],
-    queryFn: () => api.status(),
+    queryFn: () => readStatus(),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     refetchInterval: 15000,
   });
+
+  async function readStatus(force = false) {
+    const before = queryClient.getQueryData<StatusResponse>(["status"]);
+    const incoming = await api.status(force);
+    const current = queryClient.getQueryData<StatusResponse>(["status"]);
+    const rateLimits = !incoming.rateLimits && current?.rateLimits !== before?.rateLimits
+      ? current?.rateLimits ?? null : mergeQuota(current?.rateLimits, incoming.rateLimits);
+    return { ...incoming, rateLimits };
+  }
 
   async function refresh() {
     if (refreshBusy.current) return;
@@ -48,7 +61,11 @@ export function Home() {
     setRefreshNote(null);
     try {
       const results = await Promise.allSettled([
-        sessionsQ.refetch({ cancelRefetch: false }), statusQ.refetch({ cancelRefetch: false }),
+        sessionsQ.refetch({ cancelRefetch: false }),
+        readStatus(true).then((incoming) => {
+          queryClient.setQueryData<StatusResponse>(["status"], (old) => ({ ...incoming, rateLimits: mergeQuota(old?.rateLimits, incoming.rateLimits) }));
+          return { isError: false };
+        }),
       ]);
       const failed = results.some((result) => result.status === "rejected" || result.value.isError);
       setRefreshNote(failed ? "刷新失败，请重试" : "已刷新");
@@ -63,8 +80,8 @@ export function Home() {
   useEffect(() => {
     return ws.subscribeList((e: ListEvent) => {
       if (e.type === "account.limits") {
-        queryClient.setQueryData(["status"], (old: unknown) =>
-          old ? { ...(old as object), rateLimits: e.limits } : old,
+        queryClient.setQueryData<StatusResponse>(["status"], (old) =>
+          old ? { ...old, rateLimits: mergeQuota(old.rateLimits, e.limits) } : old,
         );
         return;
       }
@@ -120,28 +137,8 @@ export function Home() {
             <span style={{ color: wsConnected ? "var(--green)" : "var(--red)" }}>●</span>
             手机与后台 · {wsConnected ? "已连接" : "连接中…"}
             {statusQ.data?.connections && <span> · 桌面{statusQ.data.connections.desktop === "ready" ? "已连接" : "待连接"}</span>}
-            {rate &&
-              (() => {
-                const p5 = Math.round(rate.primary.usedPercent);
-                const sec = rate.secondary;
-                const wk = sec ? Math.round(sec.usedPercent) : null;
-                const weekFull = wk != null && wk >= 99;
-                const full = p5 >= 99 || weekFull;
-                const resetAt = new Date((weekFull && sec ? sec : rate.primary).resetsAt * 1000);
-                const hhmm = `${String(resetAt.getHours()).padStart(2, "0")}:${String(resetAt.getMinutes()).padStart(2, "0")}`;
-                const stale =
-                  "measuredAt" in rate && typeof rate.measuredAt === "number" && Date.now() - rate.measuredAt > 15 * 60_000
-                    ? `（${new Date(rate.measuredAt).getHours()}:${String(new Date(rate.measuredAt).getMinutes()).padStart(2, "0")} 数据）`
-                    : "";
-                return (
-                  <span style={full ? { color: "var(--red)", fontWeight: 700 } : undefined}>
-                    {" · "}
-                    {full ? `额度用尽 ${hhmm} 重置` : `额度 ${p5}%${wk != null ? ` / 周 ${wk}%` : ""}`}
-                    {stale}
-                  </span>
-                );
-              })()}
           </div>
+          <QuotaStatus rate={rate} loading={statusQ.isPending} error={statusQ.isError} />
         </div>
         <button className="icon-btn" aria-label="刷新会话" title="刷新会话" disabled={refreshing} onClick={refresh}>
           ↻

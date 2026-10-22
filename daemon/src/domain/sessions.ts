@@ -760,12 +760,16 @@ export class SessionRegistry {
           outputTokens: f.outputTokens,
         };
         if (s) s.tokenUsage = usage;
-        if (f.rateLimits && this.limits) this.limits.ingest(f.rateLimits.primary, f.rateLimits.secondary);
+        if (f.rateLimits && this.limits) this.limits.ingest(f.rateLimits.primary, f.rateLimits.secondary, Date.now(), { ...f.rateLimits, source: "notification" });
         this.bus.publish(f.threadId, { type: "usage.updated", tokenUsage: usage, rateLimits: null });
         return;
       }
       case "accountRateLimits": {
-        if (this.limits) this.limits.ingest(f.rateLimits.primary, f.rateLimits.secondary);
+        if (this.limits) this.limits.ingest(f.rateLimits.primary, f.rateLimits.secondary, Date.now(), { ...f.rateLimits, source: "notification" });
+        return;
+      }
+      case "accountChanged": {
+        this.limits?.reset();
         return;
       }
       case "approvalRequest": {
