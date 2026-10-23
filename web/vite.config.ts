@@ -42,6 +42,8 @@ export default defineConfig(({ mode }) => ({
         globIgnores: ["**/version.json"],
         // 静态资源预缓存；API/WS 永不缓存
         navigateFallback: "/index.html",
+        // 下载和 API 导航必须到后台；回落到 React 页面会使 APK 链接显示空白。
+        navigateFallbackDenylist: [/^\/(?:api|downloads)(?:\/|$)/],
         runtimeCaching: [],
       },
     }),

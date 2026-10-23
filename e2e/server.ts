@@ -160,7 +160,9 @@ Bun.serve({ hostname: "127.0.0.1", port: 48917, fetch: (req, server) => {
     return new Response(legacyPage, { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } });
   }
   if ((pwaVersion === "old" || pwaVersion === "legacy") && pathname === "/sw.js") {
-    const script = readFileSync(join(webDist, "sw.js"), "utf8").replace(/revision:(?:null|"[^"]+")/g, 'revision:"pwa-old"');
+    const script = readFileSync(join(webDist, "sw.js"), "utf8").replace(/revision:(?:null|"[^"]+")/g, 'revision:"pwa-old"')
+      // 旧入口没有下载/API 放行规则；升级测试必须覆盖实际曾发布的导航行为。
+      .replace(/,\{denylist:\[[^\]]*\]\}/g, "");
     return new Response(script + "\n// isolated old PWA\n", { headers: { "Content-Type": "application/javascript", "Cache-Control": "no-store" } });
   }
   if ((pwaVersion === "old" || pwaVersion === "legacy") && /^\/assets\/[a-zA-Z0-9_-]+\.js$/.test(pathname)) {
