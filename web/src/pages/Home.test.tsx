@@ -16,19 +16,35 @@ function summary(status: SessionSummary["status"], at: number): SessionSummary {
   return { id: "s1", title: "真实桌面任务", cwd: "C:/projects", agent: "codex", status,
     statusUpdatedAt: at, desktopManaged: true, activeElsewhere: false, activeVia: null,
     desktopGone: false, forkedFromId: null, forkedToId: null, preview: "",
-    lastActivityAt: 0, approvalPolicy: "never", pendingApprovals: 0 };
+    lastActivityAt: Date.now(), approvalPolicy: "never", pendingApprovals: 0 };
 }
 
-function mount(initial?: SessionSummary) {
+function mount(initial?: SessionSummary, route = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   if (initial) client.setQueryData(["sessions"], { sessions: [initial] });
-  render(<QueryClientProvider client={client}><MemoryRouter><Home /></MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[route]}><Home /></MemoryRouter></QueryClientProvider>);
   return client;
 }
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
 describe("首页显示权威运行状态", () => {
+  test("首页仅展示近30天；全部入口不受时间限制且只显示所选代理，可搜索项目", async () => {
+    const recent = { ...summary("done", 1), id: "recent", title: "最近 Codex" };
+    const old = { ...summary("done", 1), id: "old", title: "很早的 Codex", lastActivityAt: Date.now() - 40 * 86400_000 };
+    const claude = { ...old, id: "claude:old", title: "Claude 历史", agent: "claude" as const };
+    vi.mocked(api.sessions).mockReset().mockResolvedValue({ sessions: [recent, old, claude] });
+    mount();
+    expect(await screen.findByText("最近 Codex")).toBeTruthy(); expect(screen.queryByText("很早的 Codex")).toBeNull();
+    fireEvent.click(screen.getByRole("link", { name: "全部 Codex 会话 ›" }));
+    expect(await screen.findByText("很早的 Codex")).toBeTruthy(); expect(screen.queryByText("Claude 历史")).toBeNull();
+    expect(api.sessions).toHaveBeenLastCalledWith({ agent: "codex", scope: "all" });
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索全部会话" }), { target: { value: "没有这个项目" } });
+    expect(await screen.findByText("没有匹配的会话")).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "返回最近会话" }));
+    fireEvent.click(screen.getByRole("link", { name: "全部 Claude Code 会话 ›" }));
+    expect(await screen.findByText("Claude 历史")).toBeTruthy(); expect(screen.queryByText("很早的 Codex")).toBeNull();
+  });
   test("首次打开就显示真实运行状态，无需进入会话或再刷新", async () => {
     vi.mocked(api.sessions).mockResolvedValueOnce({ sessions: [summary("running", 2)] });
     mount();

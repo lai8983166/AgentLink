@@ -78,8 +78,9 @@ export class ApiClient {
   pushTest(id: string) {
     return this.request<{ device: PushDeviceStatus | null }>(`/api/v1/push/subscriptions/${encodeURIComponent(id)}/test`, { method: "POST" });
   }
-  sessions() {
-    return this.request<SessionListResponse>("/api/v1/sessions");
+  sessions(options?: { agent: "codex" | "claude"; scope: "all" }) {
+    const query = options ? "?" + new URLSearchParams(options) : "";
+    return this.request<SessionListResponse>("/api/v1/sessions" + query, { cache: "no-store" });
   }
   sessionDetail(id: string) {
     return this.history.load(id);

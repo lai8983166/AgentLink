@@ -2,7 +2,9 @@ import type { SessionListResponse, SessionSummary } from "@agentlink/shared";
 
 /** 旧 HTTP 响应或迟到事件不能回滚较新的权威状态。 */
 export function mergeSessionSummary(current: SessionSummary | undefined, incoming: SessionSummary): SessionSummary {
-  if (!current || (incoming.statusUpdatedAt ?? 0) >= (current.statusUpdatedAt ?? 0)) return incoming;
+  if (!current) return incoming;
+  incoming = { ...incoming, lastActivityAt: Math.max(current.lastActivityAt, incoming.lastActivityAt) };
+  if ((incoming.statusUpdatedAt ?? 0) >= (current.statusUpdatedAt ?? 0)) return incoming;
   return {
     ...incoming,
     status: current.status,
@@ -15,5 +17,5 @@ export function mergeSessionSummary(current: SessionSummary | undefined, incomin
 
 export function mergeSessionList(current: SessionListResponse | undefined, incoming: SessionListResponse): SessionListResponse {
   const existing = new Map(current?.sessions.map((s) => [s.id, s]) ?? []);
-  return { sessions: incoming.sessions.map((s) => mergeSessionSummary(existing.get(s.id), s)) };
+  return { ...incoming, sessions: incoming.sessions.map((s) => mergeSessionSummary(existing.get(s.id), s)) };
 }

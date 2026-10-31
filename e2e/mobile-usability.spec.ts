@@ -90,7 +90,7 @@ test("新任务描述在键盘弹出后仍可见、可输入", async ({ page }) 
 
 function listSession(index: number): SessionSummary {
   return { id: `list-${index}`, title: `列表测试 ${index}`, agent: "codex", cwd: "F:/e2e", status: "idle",
-    statusUpdatedAt: 1, lastActivityAt: 1, desktopManaged: false, activeElsewhere: false, activeVia: null,
+    statusUpdatedAt: 1, lastActivityAt: Date.now(), desktopManaged: false, activeElsewhere: false, activeVia: null,
     desktopGone: false, forkedFromId: null, forkedToId: null, preview: "测试会话", approvalPolicy: "never", pendingApprovals: 0 };
 }
 

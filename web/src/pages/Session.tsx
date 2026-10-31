@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SessionDetailResponse, SessionEvent } from "@agentlink/shared";
 import { api, ws } from "../runtime";
@@ -37,6 +37,8 @@ function SessionView() {
   const isClaude = sessionId.startsWith("claude:");
   const [search, setSearch] = useSearchParams();
   const navigate = useNavigate();
+  const origin = useLocation().state?.listBackTo;
+  const listBackTo = ["/?view=all&agent=codex", "/?view=all&agent=claude"].includes(origin) ? origin : "/";
   const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
@@ -97,6 +99,7 @@ function SessionView() {
   // 先行 observe 让基准快照尽早落地，history.sync 到达即重拉 detail（快照直出，快）
   const summary =
     detailQ.data?.session ??
+    queryClient.getQueryData<{ id: string; activeElsewhere: boolean; desktopGone: boolean; desktopManaged?: boolean }>(["session-summary", sessionId]) ??
     queryClient
       .getQueryData<{ sessions: Array<{ id: string; activeElsewhere: boolean; desktopGone: boolean; desktopManaged?: boolean }> }>(["sessions"])
       ?.sessions.find((s) => s.id === sessionId);
@@ -286,7 +289,7 @@ function SessionView() {
     <div className={`session-page${inputAtTop || inputFallback ? " composer-at-top" : ""}`} data-input-layout={inputAtTop ? "manual-top" : inputFallback ? "auto-top" : "bottom"} style={viewportStyle}>
       <div className="session-header">
       <div className="topbar">
-        <Link to="/" className="back">
+        <Link to={listBackTo} className="back">
           ‹
         </Link>
         <div className="title">

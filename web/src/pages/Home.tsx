@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ListEvent, SessionSummary, SessionListResponse, StatusResponse } from "@agentlink/shared";
 import { api, ws } from "../runtime";
@@ -11,6 +11,7 @@ import { usePullToRefresh } from "../pull-to-refresh";
 import { UpdateNotice } from "../components/UpdateNotice";
 import { QuotaStatus } from "../components/QuotaStatus";
 import { mergeQuota } from "../quota";
+import { recentSessions } from "../session-list";
 
 /** 电脑上正被其他入口使用的会话排在运行中之后、已完成之前 */
 function effectiveOrder(s: SessionSummary): number {
@@ -19,6 +20,12 @@ function effectiveOrder(s: SessionSummary): number {
 
 /** 首页：会话列表 + 待审批横幅 + 连接 pill + 额度（任务 7.3） */
 export function Home() {
+  const [params] = useSearchParams();
+  const catalogAgent = params.get("view") === "all" && ["codex", "claude"].includes(params.get("agent") ?? "")
+    ? params.get("agent") as "codex" | "claude" : undefined;
+  const [search, setSearch] = useState("");
+  const [shown, setShown] = useState(50);
+  const listKey = catalogAgent ? ["sessions", "all", catalogAgent] : ["sessions"];
   const queryClient = useQueryClient();
   const wsConnected = useStore((s) => s.wsConnected);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -28,10 +35,10 @@ export function Home() {
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
 
   const sessionsQ = useQuery({
-    queryKey: ["sessions"],
+    queryKey: listKey,
     queryFn: async () => {
-      const incoming = await api.sessions();
-      return mergeSessionList(queryClient.getQueryData<SessionListResponse>(["sessions"]), incoming);
+      const incoming = await api.sessions(catalogAgent ? { agent: catalogAgent, scope: "all" } : undefined);
+      return mergeSessionList(queryClient.getQueryData<SessionListResponse>(listKey), incoming);
     },
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -75,6 +82,7 @@ export function Home() {
     }
   }
   const pull = usePullToRefresh(listRef, refresh, refreshing);
+  useEffect(() => { setSearch(""); setShown(50); if (listRef.current) listRef.current.scrollTop = 0; }, [catalogAgent]);
 
   // 列表级事件：增量更新缓存（WS 驱动，轮询兜底）；账户限额 → 状态缓存
   useEffect(() => {
@@ -86,22 +94,26 @@ export function Home() {
         return;
       }
       if (!("summary" in e)) return;
-      queryClient.setQueryData(["sessions"], (old: { sessions: SessionSummary[] } | undefined) => {
+      if (catalogAgent && e.summary.agent !== catalogAgent) return;
+      queryClient.setQueryData(listKey, (old: { sessions: SessionSummary[] } | undefined) => {
         const list = [...(old?.sessions ?? [])];
         const i = list.findIndex((s) => s.id === e.summary.id);
         if (e.type === "session.deleted") {
           if (i >= 0) list.splice(i, 1);
         } else if (i >= 0) list[i] = mergeSessionSummary(list[i], e.summary);
         else list.unshift(e.summary);
-        return { sessions: list };
+        return { ...old, sessions: list };
       });
     });
-  }, [queryClient]);
+  }, [queryClient, catalogAgent]);
 
-  const sessions = [...(sessionsQ.data?.sessions ?? [])].sort(
+  const available = sessionsQ.data?.sessions ?? [];
+  const selected = catalogAgent ? available.filter(s => s.agent === catalogAgent) : recentSessions(available);
+  const matched = selected.filter(s => !search.trim() || (s.title + " " + s.cwd).toLowerCase().includes(search.trim().toLowerCase()));
+  const sessions = [...matched].sort(
     (a, b) =>
       effectiveOrder(a) - effectiveOrder(b) || b.lastActivityAt - a.lastActivityAt,
-  );
+  ).slice(0, catalogAgent ? shown : undefined);
   const waiting = sessions.filter((s) => s.status === "waiting_approval");
   const active = sessions.filter(
     (s) => s.status === "running" || s.status === "waiting_approval",
@@ -114,10 +126,11 @@ export function Home() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100dvh" }}>
       <div className="topbar">
+        {catalogAgent && <Link to="/" className="back" aria-label="返回最近会话">‹</Link>}
         <div className="title">
           <div className="name">
             <span className="logo" />
-            AgentLink
+            {catalogAgent ? catalogAgent === "codex" ? "全部 Codex 会话" : "全部 Claude Code 会话" : "AgentLink"}
           </div>
           <div
             style={{
@@ -149,12 +162,21 @@ export function Home() {
       </div>
 
       <UpdateNotice />
+      {!catalogAgent ? <nav aria-label="查看全部会话" style={{ display: "flex", gap: 8, padding: "8px 16px", flexShrink: 0 }}>
+        <Link className="btn ghost" to="/?view=all&agent=codex" style={{ flex: 1, fontSize: 12 }}>全部 Codex 会话 ›</Link>
+        <Link className="btn ghost" to="/?view=all&agent=claude" style={{ flex: 1, fontSize: 12 }}>全部 Claude Code 会话 ›</Link>
+      </nav> : <div style={{ padding: "8px 16px", flexShrink: 0 }}>
+        <input aria-label="搜索全部会话" placeholder="搜索标题或项目路径" value={search} onChange={e => { setSearch(e.target.value); setShown(50); }} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", fontSize: 16 }} />
+        <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 5 }}>不限制活跃时间 · {matched.length} 个会话</div>
+      </div>}
       {(pull.distance > 0 || refreshing || refreshNote) && (
         <div className="refresh-indicator" role="status" style={{ height: Math.max(28, pull.distance / 2) }}>
           {refreshing ? "刷新中…" : pull.distance > 0 ? pull.armed ? "松开刷新" : "继续下拉以刷新" : refreshNote}
         </div>
       )}
       <div className="content session-list" data-testid="session-list" ref={listRef} aria-busy={refreshing}>
+        {!catalogAgent && <div className="section-label">最近 30 天活跃</div>}
+        {sessionsQ.data?.warnings?.map(warning => <div role="status" key={warning} style={{ color: "var(--red)", fontSize: 12, padding: "8px 0" }}>{warning}</div>)}
         {waiting.length > 0 && (
           <Link
             to={`/${waiting[0]!.id}`}
@@ -182,13 +204,14 @@ export function Home() {
 
         {active.length > 0 && <div className="section-label">进行中</div>}
         {active.map((s) => (
-          <SessionCard key={s.id} s={s} alert={s.status === "waiting_approval"} />
+          <SessionCard key={s.id} s={s} alert={s.status === "waiting_approval"} backTo={catalogAgent ? "/?view=all&agent=" + catalogAgent : "/"} />
         ))}
 
         {rest.length > 0 && <div className="section-label">其他会话</div>}
         {rest.map((s) => (
-          <SessionCard key={s.id} s={s} dim={s.status === "idle"} />
+          <SessionCard key={s.id} s={s} dim={s.status === "idle"} backTo={catalogAgent ? "/?view=all&agent=" + catalogAgent : "/"} />
         ))}
+        {catalogAgent && matched.length > shown && <button className="btn ghost" style={{ margin: "12px auto" }} onClick={() => setShown(n => n + 50)}>加载更多会话</button>}
 
         {sessionsQ.isLoading && <div className="empty-note">加载中…</div>}
         {sessionsQ.isError && <div className="empty-note">
@@ -196,7 +219,7 @@ export function Home() {
           <button className="btn ghost" style={{ margin: "10px auto" }} disabled={refreshing} onClick={refresh}>重试加载</button>
         </div>}
         {!sessionsQ.isLoading && !sessionsQ.isError && sessions.length === 0 && (
-          <div className="empty-note">还没有会话 · 点右下角 ＋ 派个任务</div>
+          <div className="empty-note">{catalogAgent ? search ? "没有匹配的会话" : "还没有会话" : "最近 30 天还没有会话 · 可从上方查看全部会话"}</div>
         )}
       </div>
 
@@ -208,7 +231,8 @@ export function Home() {
   );
 }
 
-function SessionCard({ s, alert, dim }: { s: SessionSummary; alert?: boolean; dim?: boolean }) {
+function SessionCard({ s, alert, dim, backTo }: { s: SessionSummary; alert?: boolean; dim?: boolean; backTo: string }) {
+  const queryClient = useQueryClient();
   const statusLabel: Record<string, string> = {
     running: "运行中",
     waiting_approval: "等待审批",
@@ -219,7 +243,7 @@ function SessionCard({ s, alert, dim }: { s: SessionSummary; alert?: boolean; di
   };
   const dot = s.status === "waiting_approval" ? "waiting" : s.status;
   return (
-    <Link to={`/${s.id}`} className={`card${alert ? " alert" : ""}${dim ? " dim" : ""}`} style={{ textDecoration: "none", color: "inherit", display: "block" }}>
+    <Link to={`/${s.id}`} state={{ listBackTo: backTo }} onClick={() => queryClient.setQueryData(["session-summary", s.id], s)} className={`card${alert ? " alert" : ""}${dim ? " dim" : ""}`} style={{ textDecoration: "none", color: "inherit", display: "block" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span className={`dot ${dot}`} />
         <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
