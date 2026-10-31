@@ -45,3 +45,9 @@ Android 14 AOSP、无 Google 服务的隔离模拟器运行在当前 WSL 软件�
 上述自动化没有在实体安卓设备上重复锁屏、关闭页面及系统通知展示验收。用户此前已确认旧 APK 测试通知可用；新版 Claude 任务通知仍需在真机确认。Windows 原终端按 Esc 后的输入限制和原生问答限制见插件 README。
 
 部署后本机与公网 `https://agentlink.example/downloads/agentlink.apk` 均返回 200、`application/vnd.android.package-archive`，3,718,703 字节，SHA-256 与上述签名包一致；APK Signature Scheme v2 验证通过。后台已更新至 0.2.0，覆盖安装 APK 后沿用原配对与通知设置。
+
+## 2026-10-31：0.2.1 分页、历史缓存与增量核对
+
+已构建签名 release APK：`io.agentlink.mobile`，版本 `0.2.1`、versionCode `3`，沿用现有签名，minSdk 26、targetSdk 36；APK Signature Scheme v2 验证通过。SHA-256：`7cd1931ad2b11a609ee5c9739ab834758b57dca39e9c31ccd2c2c0bf726a787a`。Kotlin 3 项单元测试通过。内置页面采用最近记录分页、IndexedDB 缓存、按版本核对变化，既有配对、草稿及通知设置继续保留。
+
+本次未改原生通知服务，未重复实体手机系统通知或锁屏验收。页面缓存与滚动行为由真实 Chromium 桌面、手机尺寸测试验证；实体 WebView 的最终体验仍需真机确认。
