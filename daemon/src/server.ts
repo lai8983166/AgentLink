@@ -26,6 +26,7 @@ import { WebPushService, type PushSender } from "./notify/web-push";
 import { createPushRouter } from "./routes/push";
 import { createNativePushRouter } from "./routes/native-push";
 import { cors } from "hono/cors";
+import { compress } from "hono/compress";
 import { ClaudeSessions } from "./claude/sessions";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
@@ -66,6 +67,10 @@ export function createApp(opts: {
   const auth = { token: opts.token };
   // APK 内置页面的固定本地来源；API 仍必须通过 Bearer 配对认证。
   app.use("/api/*", cors({ origin: "https://localhost", allowHeaders: ["Authorization", "Content-Type"], allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
+  // 长会话快照可达数 MB；压缩只读详情，避免移动网络下载超过客户端超时。
+  // 不改历史内容、事件序号或写操作，也不拦截 WebSocket/APK 下载。
+  const compressDetail = compress({ contentTypeFilter: /^application\/json\b/ });
+  app.use("/api/v1/sessions/:id", (c, next) => c.req.method === "GET" ? compressDetail(c, next) : next());
 
   // 健康检查：无需认证
   app.get(API.health, (c) => c.json({ ok: true, daemon: "agentlink", version: DAEMON_VERSION }));

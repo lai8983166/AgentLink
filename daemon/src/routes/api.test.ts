@@ -142,6 +142,34 @@ describe("REST API", () => {
     expect(typeof body.latestSeq).toBe("number");
   });
 
+  test("APK 来源的长会话压缩传输，解压后历史和序号完整，禁用压缩仍可读取", async () => {
+    const { app, authed, registry } = await setup();
+    const original = await registry.detail("old1");
+    original.session.history = Array.from({ length: 1600 }, (_, i) => ({
+      type: "agentMessage" as const, id: "item-" + i, at: i,
+      text: ("这是完整的长会话输出、代码和工具记录。\n").repeat(100),
+    }));
+    original.latestSeq = 1700;
+    registry.detail = async () => original;
+    const headers = { ...authed, Origin: "https://localhost", "Accept-Encoding": "gzip, deflate, br" };
+    const response = await app.request("/api/v1/sessions/old1", { headers });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Encoding")).toBe("gzip");
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://localhost");
+    expect(response.headers.get("Vary")).toContain("Accept-Encoding");
+    expect(response.headers.get("Vary")).toContain("Origin");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const compressed = new Uint8Array(await response.arrayBuffer());
+    const decoded = new TextDecoder().decode(Bun.gunzipSync(compressed));
+    expect(JSON.parse(decoded)).toEqual(original);
+    expect(compressed.length).toBeLessThan(new TextEncoder().encode(decoded).length / 5);
+    const plain = await app.request("/api/v1/sessions/old1", { headers: { ...headers, "Accept-Encoding": "gzip;q=0, deflate;q=0" } });
+    expect(plain.headers.get("Content-Encoding")).toBeNull();
+    expect(await plain.json()).toEqual(original);
+    const denied = await app.request("/api/v1/sessions/old1", { headers: { Origin: "https://localhost", "Accept-Encoding": "gzip" } });
+    expect(denied.status).toBe(401);
+  });
+
   test("未启用 owner 探测时不能恢复桌面原会话：502 且不会写入 thread/resume", async () => {
     const { app, fake, authed } = await setup();
     const res = await app.request("/api/v1/sessions/old1/resume", {
