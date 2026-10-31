@@ -1,0 +1,4 @@
+{
+  "description": "Opt-in AgentLink terminal verification",
+  "modules": ["./register.js"]
+}

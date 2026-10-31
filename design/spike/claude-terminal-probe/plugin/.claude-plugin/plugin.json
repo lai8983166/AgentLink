@@ -1,0 +1,6 @@
+{
+  "name": "agentlink-terminal-probe",
+  "version": "0.1.0",
+  "description": "Opt-in local probe of the original Claude Code terminal session",
+  "author": { "name": "AgentLink" }
+}
