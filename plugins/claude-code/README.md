@@ -15,6 +15,8 @@ node plugins/install.mjs
 
 已经打开的 Claude 会话中，输入 `/reload-plugins` 加载插件；`/agentlink` 查看原会话 ID。热加载到正在执行中的会话时，暂时显示状态待确认，后续真实轮次事件会更新状态。只有观察到当前 turn ID 后才开放停止按钮。
 
+手机 APK 需更新到 0.2.0；网页刷新至新版。当前实际验收环境为 Windows 原生交互终端。旧 WSL Claude 2.1.23 不支持本插件接口；跨 Windows/WSL 连接尚未验收。
+
 仅对某个终端试用而不安装：
 
 ```sh
@@ -39,6 +41,8 @@ claude --plugin-dir "<AgentLink 仓库>/plugins/claude-code"
 
 会话只允许来自后台配置的项目根目录白名单。离线时显示未连接，不将运行状态猜成空闲。后台用 `claude.db` 保存历史和回执；原进程仍拥有所有实际执行。插件实例更换后未确认指令不会自动重放。
 
+短暂后台重启时，等待中的审批会以原请求 ID 恢复，插件重新发现本机端口；长时间失联则回退原生终端处理，不伪造审批成功。
+
 ## 验证
 
 ```sh
@@ -47,4 +51,10 @@ claude plugin test ./plugins/claude-code
 bun test daemon/src/claude
 ```
 
-真实终端的早期接口验证见 `design/spike/claude-terminal-probe/VERIFICATION.md`；正式集成另由隔离浏览器与 CLI fixture 验证。测试不向真实用户会话发送消息或审批。
+真实终端的早期接口验证见 `design/spike/claude-terminal-probe/VERIFICATION.md`。正式集成使用真实原生 Claude CLI、正式插件与手机页面，模型服务由本机假接口提供，不消耗真实模型额度，不向用户会话发送消息或审批：
+
+1. 在 Windows 真实交互终端运行 `bun scripts/claude-live-fixture.mjs`，只确认该夹具的空目录信任与假 API key 提示。
+2. 在另一个终端运行 `node scripts/verify-claude-live.mjs "<夹具目录>/run.json"`。
+3. 验证结束在夹具 Claude 终端输入 `/exit` 退出。
+
+验证覆盖发送与输出、真实工具审批、审批中后台重启、运行中后台重启及端口变化、手机页面关闭后的原生通知收件箱、停止后继续同一会话。结果保存在被 Git 忽略的夹具目录；不上传原会话数据。

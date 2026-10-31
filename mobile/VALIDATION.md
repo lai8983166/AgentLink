@@ -35,3 +35,11 @@ Android 14 AOSP、无 Google 服务的隔离模拟器运行在当前 WSL 软件�
 已在真实 Service Worker 控制的桌面/手机尺寸浏览器中复现：旧版导航回退会把 `/downloads/agentlink.apk` 返回为缓存的 HTML，React 无匹配路由后显示空白。新增 `/downloads/`、`/api/` 导航放行规则，并验证旧缓存更新后恢复文件下载、配对保持不变。
 
 类型检查与网页构建通过；新增下载回归及原有缓存更新用例共 10 项通过。公网新浏览器上下文实际下载 `https://agentlink.example/downloads/agentlink.apk` 成功，文件名、3,717,507 字节大小和 SHA-256 与签名 APK 一致；公网 `/sw.js` 已含新的放行规则。本次没有改动 APK、原生服务或电脑会话逻辑，不涉及安卓通知运行验收。
+
+## 2026-10-31：0.2.0 Claude 原终端接入
+
+已构建签名 release APK：包名 `io.agentlink.mobile`，版本 `0.2.0`、versionCode `2`，沿用现有签名，可覆盖安装；minSdk 26、targetSdk 36。SHA-256：`3ca278c411fbb205944190a1b951c696987c677cce87d60b249ea9a65247d8ba`。Kotlin 3 项本地单元测试通过，内置 React 页面包含 Claude 会话列表、聊天、排队回执、工具审批及原终端限制说明。
+
+全量浏览器测试 78 项通过、2 项桌面触摸用例跳过；隔离真实 Windows Claude CLI 与手机尺寸页面验证同进程、同会话发送、审批、停止及继续，审批中和运行中重启后台后恢复。关闭页面后的 Claude 任务完成进入原生通知收件箱，并链接原会话。
+
+上述自动化没有在实体安卓设备上重复锁屏、关闭页面及系统通知展示验收。用户此前已确认旧 APK 测试通知可用；新版 Claude 任务通知仍需在真机确认。Windows 原终端按 Esc 后的输入限制和原生问答限制见插件 README。

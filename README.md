@@ -2,10 +2,11 @@
 
 家里 agent 的遥控器：agent 身体在 PC 上，手机是远程驾驶舱。派任务、看流式输出、批审批、收推送。
 
-- `daemon/` — PC 侧常驻进程（Bun + Hono + TS），桥接 codex app-server
+- `daemon/` — PC 侧常驻进程（Bun + Hono + TS），桥接 Codex 与 Claude Code 原终端
 - `web/` — 手机端 PWA（React + Vite）
 - `mobile/` — 自用安卓 APK（复用 React 界面，Kotlin 后台通知，无 Google 服务依赖）
 - `shared/` — API 契约包（REST/WS/事件 zod schema，两端共用）
+- `plugins/` — Claude Code 原终端插件及本地安装工具
 - `design/` — UI 原型、设计笔记、codex 协议摸底实录
 - `openspec/` — 规格与变更管理
 
@@ -26,6 +27,12 @@ pnpm dev              # 启动 daemon :8787 → curl /api/v1/health
 电脑端已打开该会话时，在手机点击“接管此会话”，通过原拥有者发送消息和审批。旧会话没有被其他入口持有时，可点击“继续原会话”：后台确认 IPC 没有拥有者、Windows 写入锁已释放后，恢复同一个会话 ID，保留历史和记录中的执行权限，不创建 fork。
 
 电脑、AgentLink 后台和桌面 IPC 通道仍需在线。连接异常、占用状态不明或仍有写入者时拒绝恢复，不把失联当作已释放。恢复成功后由 AgentLink 的 app-server 持有这条会话；手机刷新不重置运行任务。之后在电脑端重新编辑，需要先交还写入权；当前没有自动反向交接功能。关闭手机页面只释放浏览器连接，不中断后台任务，也不释放 app-server 写入权。
+
+## Claude Code 原终端
+
+新版后台运行后，在本机 Windows 终端的仓库根目录执行 `node plugins/install.mjs`。要求 Claude Code ≥ 2.1.314；安装命令不会升级 CLI。已有 Claude 会话输入 `/reload-plugins`，以后直接启动 `claude` 即会加载。手机列表显示 CLAUDE 标识，可查看输出、发送指令、处理工具审批、停止任务和接收完成通知。APK 需要更新至 0.2.0，网页需要刷新至新版。
+
+插件控制原进程、原会话，不恢复或 fork 另一个进程。当前仅验收 Windows 原生交互终端；电脑原生 Esc 后需在原终端发送一条消息解除输入限制，问答与计划确认等交互仍需原终端处理。安装、限制与隔离验证见 [Claude 插件说明](plugins/claude-code/README.md)。
 
 ## 文档
 
