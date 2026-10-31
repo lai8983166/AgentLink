@@ -249,3 +249,5 @@ Claude 原生主会话目录来自当前用户默认配置 projects（可由后�
 在独立临时数据库、禁用桌面 IPC 的新应用实例中，使用真实 Codex app-server 只读初始化和列表接口验证：全部 Codex 65 条、近30天16条，442 ms；Claude 原生主会话13条、近30天12条，43 ms。较早的一条 Claude 会话窗口返回45个历史项、controlMode=observe、connected=false。未加载或恢复任何真实线程；独立 app-server 和临时数据库已关闭清理。
 
 公网 APK 已返回正确 MIME、3,736,551 字节，SHA-256 与 0.2.2 签名包一致。首次生产后台更新被 scripts/restart-daemon.ps1 拒绝：Claude 原会话正在 running、无在途发送。没有绕过安全检查或停止该任务，正式后台升级等待本轮结束；因此不能仅凭 APK 下载已更新宣称全部历史目录已在正式后台启用。
+
+为完成这次已授权部署，电脑用户配置目录准备了一次性 `deploy-0.2.2.mjs` 等待程序（不属于常驻 daemon，不含凭据，启动时绑定本次最终 Git 提交）。每15秒查询 readiness，仅在安全检查通过且源码未改变时调用原 scripts/restart-daemon.ps1 -Execute，再核对 health=0.2.2。最多等待两小时；源码变化、取消标记或版本核对失败会停止，不提供强制重启路径。状态写入用户目录 `.agentlink/deploy-0.2.2-status.json`；当前任务结束后无需再发送控制指令触发部署。
