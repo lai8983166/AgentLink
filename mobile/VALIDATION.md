@@ -43,3 +43,5 @@ Android 14 AOSP、无 Google 服务的隔离模拟器运行在当前 WSL 软件�
 全量浏览器测试 78 项通过、2 项桌面触摸用例跳过；隔离真实 Windows Claude CLI 与手机尺寸页面验证同进程、同会话发送、审批、停止及继续，审批中和运行中重启后台后恢复。关闭页面后的 Claude 任务完成进入原生通知收件箱，并链接原会话。
 
 上述自动化没有在实体安卓设备上重复锁屏、关闭页面及系统通知展示验收。用户此前已确认旧 APK 测试通知可用；新版 Claude 任务通知仍需在真机确认。Windows 原终端按 Esc 后的输入限制和原生问答限制见插件 README。
+
+部署后本机与公网 `https://agentlink.example/downloads/agentlink.apk` 均返回 200、`application/vnd.android.package-archive`，3,718,703 字节，SHA-256 与上述签名包一致；APK Signature Scheme v2 验证通过。后台已更新至 0.2.0，覆盖安装 APK 后沿用原配对与通知设置。

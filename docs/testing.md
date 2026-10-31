@@ -203,3 +203,5 @@ powershell -NoProfile -File scripts/restart-daemon.ps1 -Execute
 单元与浏览器回归另覆盖命令幂等、回执顺序、失联不误报完成、插件实例替换不重放、错误轮次通知、审批过期与唯一关联、排队历史确认清理以及不调用 Codex 恢复路径。后台只向 `127.0.0.1` 暴露独立凭据的插件桥接，拒绝浏览器 Origin；移动端沿用原配对认证。
 
 当前验收范围是已加载插件的 Windows 原生终端。电脑 Esc 后需原终端输入解除限制；原生问答、计划确认等仍需电脑处理。未验收跨 Windows/WSL，也没有用浏览器测试替代实体手机锁屏推送、系统省电或长时间待机测试。新版 APK 验证记录见 `mobile/VALIDATION.md`。
+
+部署核对：安全重启脚本确认无后台活动任务或 AgentLink 持有的写锁后，将生产后台由 PID 44452 更新为 47480；没有重启桌面或 Claude 终端。本机与公网 health 均返回 0.2.0；公网页面 `/assets/index-Bh7MSIKV.js` 包含 Claude 界面和终端状态事件。正式用户范围已通过官方 CLI 安装 `agentlink@agentlink-local` 0.2.0，未向已有用户终端发送 `/reload-plugins`。认证会话列表返回 200，本机私有插件桥接无认证返回 401。公网 APK 返回正确 Android MIME、3,718,703 字节，SHA-256 与本地签名包一致；签名校验通过。用户需覆盖安装 APK，并在需要接入的已有 Claude 终端自行加载插件。
