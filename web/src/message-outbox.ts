@@ -22,7 +22,7 @@ function readMessages(key: string): OutgoingMessage[] {
     if (Array.isArray(list)) return list.filter((m) => m && typeof m.id === "string" && typeof m.text === "string" &&
       typeof m.at === "number" && (m.afterId === null || typeof m.afterId === "string") &&
       Array.isArray(m.knownUserIds) && m.knownUserIds.every((id: unknown) => typeof id === "string") &&
-      ["sending", "accepted", "failed", "uncertain"].includes(m.state))
+      ["sending", "queued", "accepted", "failed", "uncertain"].includes(m.state))
       .map((m) => ({ ...m, state: m.state === "sending" ? "uncertain" : m.state }));
   } catch { /* 存储不可用时使用内存中的记录 */ }
   return [];
@@ -53,7 +53,7 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
     const confirmed = new Set(reconcileOutgoingHistory(history, current).confirmedIds);
     const exact = (message: { id: string | null; text: string }) => !!message.id && history.some((item) =>
       item.type === "userMessage" && (item.clientMessageId === message.id || item.id === message.id) && item.text.trim() === message.text.trim());
-    const next = current.filter((message) => message.state === "accepted" ? !confirmed.has(message.id) :
+    const next = current.filter((message) => message.state === "accepted" || message.state === "queued" ? !confirmed.has(message.id) :
       message.state !== "uncertain" || !exact(message));
     if (next.length !== current.length) saveMessages(next);
     if (outboxRef.current.state === "uncertain" && exact(outboxRef.current)) {
@@ -86,7 +86,7 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
         knownUserIds: history.filter((item) => item.type === "userMessage").map((item) => item.id) });
     }
     const disposable = next.filter((m) => m.state === "accepted" || m.state === "failed").slice(-100);
-    next = next.filter((m) => m.state === "sending" || m.state === "uncertain" || disposable.includes(m));
+    next = next.filter((m) => m.state === "sending" || m.state === "queued" || m.state === "uncertain" || disposable.includes(m));
     saveMessages(next);
   }
   function accepted(id: string) {
@@ -97,6 +97,43 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
     else if (outboxRef.current.state === "draft") setNotice("旧指令已确认接收，新草稿已保留");
     options.onAccepted?.();
   }
+  function queued(id: string) {
+    record(id, "queued");
+    if (outboxRef.current.id === id) { save(empty()); setNotice("已排队，等待 Claude 终端开始执行"); }
+    options.onAccepted?.();
+  }
+  const queuedIds = messages.filter(m => m.state === "queued").map(m => m.id).join("\n");
+  useEffect(() => {
+    if (!queuedIds) return;
+    let canceled = false;
+    const check = async () => {
+      if (document.visibilityState !== "visible") return;
+      for (const id of queuedIds.split("\n")) {
+        if (checkingIds.current.has(id)) continue;
+        checkingIds.current.add(id);
+        try {
+          const { receipt } = await api.messageReceipt(sessionId, id);
+          if (canceled || !alive.current) return;
+          if (receipt?.state === "accepted") {
+            record(id, "accepted");
+            setNotice(outboxRef.current.text ? "排队指令已开始执行，新草稿已保留" : "Claude 已开始执行");
+            options.onAccepted?.();
+          } else if (receipt?.state === "failed" || receipt?.state === "uncertain") {
+            const message = messagesRef.current.find(m => m.id === id);
+            record(id, receipt.state);
+            if (!outboxRef.current.text && message) save({ text: message.text, id: receipt.state === "failed" ? null : id, state: receipt.state === "failed" ? "draft" : "uncertain" });
+            setNotice(receipt.error ?? "排队指令未开始，请核对终端");
+          }
+        } catch { /* Keep queued records and query again; never resend. */ }
+        finally { checkingIds.current.delete(id); }
+      }
+    };
+    void check();
+    const timer = setInterval(() => { void check(); }, 3000);
+    const wake = () => { void check(); };
+    document.addEventListener("visibilitychange", wake); window.addEventListener("online", wake);
+    return () => { canceled = true; clearInterval(timer); document.removeEventListener("visibilitychange", wake); window.removeEventListener("online", wake); };
+  }, [sessionId, queuedIds]);
   async function recheck() {
     const pending = outboxRef.current;
     const id = pending.id;
@@ -106,6 +143,7 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
       const { receipt } = await api.messageReceipt(sessionId, id);
       if (!alive.current) return;
       if (receipt?.state === "accepted") accepted(id);
+      else if (receipt?.state === "queued") queued(id);
       else if (receipt?.state === "failed") {
         record(id, "failed");
         if (outboxRef.current.id === id) { save({ ...pending, state: "failed" }); setNotice(receipt.error ?? "电脑端未接收，可重试发送"); }
@@ -125,8 +163,11 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
     try {
       const result = await api.sendMessage(sessionId, text, message.id);
       if (!alive.current) return;
-      if (result.receipt && result.receipt.state !== "accepted") throw new Error("发送结果待确认");
-      accepted(message.id);
+      if (result.receipt?.state === "queued") queued(message.id);
+      else {
+        if (result.receipt && result.receipt.state !== "accepted") throw new Error(result.receipt.error ?? "发送结果待确认");
+        accepted(message.id);
+      }
     } catch (e) {
       if (!alive.current) return;
       const error = e instanceof Error ? e.message : "发送失败";
@@ -134,8 +175,10 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
         const { receipt } = await api.messageReceipt(sessionId, message.id);
         if (!alive.current) return;
         if (receipt?.state === "accepted") accepted(message.id);
+        else if (receipt?.state === "queued") queued(message.id);
         else {
-          const state = receipt?.state === "failed" ? "failed" : "uncertain";
+          const rejected = !receipt && [400, 401, 403, 404, 409].includes((e as { status?: number }).status ?? 0);
+          const state = receipt?.state === "failed" || rejected ? "failed" : "uncertain";
           save({ ...message, state }); setNotice(receipt?.error ?? error);
           record(message.id, state);
         }

@@ -4,11 +4,18 @@
 //   bun run src/cli.ts token rotate    # 轮换 token（需重启 daemon 后生效；API 轮换则即时）
 //   bun run src/cli.ts config          # 打印配置概览（token 脱敏）
 import { configPath, loadConfig, rotateToken, saveConfig } from "./config";
+import { join } from "node:path";
 
 const cmd = process.argv[2] ?? "help";
 const sub = process.argv[3];
 
 switch (cmd) {
+  case "claude": {
+    if (sub !== "install") { console.log("用法: bun run daemon/src/cli.ts claude install"); break; }
+    const result = Bun.spawnSync([process.execPath, join(import.meta.dir, "../../plugins/install.mjs")], { stdout: "inherit", stderr: "inherit" });
+    process.exitCode = result.exitCode;
+    break;
+  }
   case "token": {
     const cfg = loadConfig();
     if (sub === "rotate") {
@@ -50,5 +57,5 @@ switch (cmd) {
     break;
   }
   default:
-    console.log("用法: bun run src/cli.ts <token|token rotate|config|roots|roots add PATH>");
+    console.log("用法: bun run src/cli.ts <token|token rotate|config|roots|roots add PATH|claude install>");
 }

@@ -8,6 +8,7 @@ import {
   SessionSummary,
   TokenUsage,
   ToolKind,
+  TerminalConnection,
 } from "./domain";
 
 /**
@@ -25,6 +26,7 @@ const EventBase = z.object({
 
 /** 会话级事件（event-stream spec「事件类型契约」） */
 export const SessionEvent = z.discriminatedUnion("type", [
+  EventBase.extend({ type: z.literal("session.terminal"), terminal: TerminalConnection }),
   EventBase.extend({
     type: z.literal("session.status"),
     status: SessionStatus,

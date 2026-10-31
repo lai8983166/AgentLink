@@ -1,0 +1,4 @@
+{
+  "description": "AgentLink original terminal connection",
+  "modules": ["./register.js"]
+}

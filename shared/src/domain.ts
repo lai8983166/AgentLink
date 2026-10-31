@@ -70,6 +70,10 @@ export const RateLimits = z.object({
 export const RateLimit = RateLimits;
 export type RateLimit = z.infer<typeof RateLimit>;
 
+export const TerminalConnection = z.object({
+  connected: z.boolean(), inputBlocked: z.boolean(), canInterrupt: z.boolean(),
+  reason: z.string().nullable(), permissionMode: z.string().nullable(), originalSessionId: z.string(),
+});
 /** 会话卡片（首页列表条目） */
 export const SessionSummary = z.object({
   id: z.string(),
@@ -77,14 +81,7 @@ export const SessionSummary = z.object({
   cwd: z.string(),
   agent: z.enum(["codex", "claude"]),
   /** Claude 原终端连接；与 Codex 的桌面所有权分开。 */
-  terminal: z.object({
-    connected: z.boolean(),
-    inputBlocked: z.boolean(),
-    canInterrupt: z.boolean(),
-    reason: z.string().nullable(),
-    permissionMode: z.string().nullable(),
-    originalSessionId: z.string(),
-  }).optional(),
+  terminal: TerminalConnection.optional(),
   status: SessionStatus,
   /** 权威状态的更新时间；用于防止旧列表响应覆盖较新的实时推送。 */
   statusUpdatedAt: z.number().optional(),

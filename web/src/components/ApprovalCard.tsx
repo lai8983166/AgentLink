@@ -6,7 +6,7 @@ import { api } from "../runtime";
 /** 审批卡片：动态决定按钮 + 一次点击决定（任务 7.5） */
 export interface PendingApprovalUI {
   approvalId: string;
-  kind: "command" | "fileChange";
+  kind: "command" | "fileChange" | "tool";
   command: string | null;
   cwd: string;
   reason: string | null;

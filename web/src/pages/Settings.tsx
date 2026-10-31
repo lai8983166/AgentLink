@@ -52,6 +52,12 @@ export function Settings() {
           </div>
         </div>
 
+        <div className="section-label">Claude Code</div>
+        <div className="card" style={{ cursor: "default", fontSize: 12, lineHeight: 1.8 }}>
+          电脑安装 AgentLink 插件后，继续在终端运行 claude，会话会自动出现在列表中。
+          <div>手机可查看输出、发送指令、审批和停止；电脑终端需要保持运行。</div>
+          <div style={{ color: "var(--text-dim)" }}>已有会话安装插件后需在终端输入 /reload-plugins。终端按 Esc 停止后，请先在电脑输入一条消息再从手机继续。</div>
+        </div>
         <div className="section-label">应用版本</div>
         <div className="card" style={{ cursor: "default", fontSize: 12, lineHeight: 1.7 }}>
           <div>当前前端版本：<span data-testid="app-build">{update.build}</span></div>

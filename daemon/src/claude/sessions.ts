@@ -84,6 +84,7 @@ export class ClaudeSessions {
     for (const s of this.states.values()) {
       if (!s.session.terminal?.connected || this.now() - s.lastSeen < 6000) continue;
       Object.assign(s.session.terminal, { connected: false, canInterrupt: false, reason: DISCONNECTED });
+      this.publish(s.session.id, { type: "session.terminal", terminal: { ...s.session.terminal } });
       this.status(s, "unknown");
       for (const a of s.approvals) this.endApproval(s, a, "expired");
       this.save(s); this.listEvent(s);
@@ -176,10 +177,12 @@ export class ClaudeSessions {
       this.states.set(id, s);
       this.listEvent(s);
     }
+    const previousTerminal = JSON.stringify(s.session.terminal);
     s.lastSeen = this.now();
     s.session.terminal = { connected: true, inputBlocked: p.inputBlocked, canInterrupt: !!p.turnId,
       reason: p.inputBlocked ? BLOCKED : p.status === "unknown" ? "原终端已连接，等待轮次状态；可发送消息" : null,
       permissionMode: p.permissionMode, originalSessionId: p.sessionId };
+    if (previousTerminal !== JSON.stringify(s.session.terminal)) this.publish(id, { type: "session.terminal", terminal: { ...s.session.terminal } });
     if (p.turnId) this.activeTurns.set(id, p.turnId); else this.activeTurns.delete(id);
     for (const event of p.events) {
       if (event.seq <= s.cursor) continue;

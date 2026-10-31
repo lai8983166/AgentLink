@@ -215,7 +215,7 @@ function SessionCard({ s, alert, dim }: { s: SessionSummary; alert?: boolean; di
     done: "已完成",
     error: "出错",
     idle: "空闲",
-    unknown: s.desktopGone ? "电脑端未连接" : "状态待确认",
+    unknown: s.agent === "claude" && !s.terminal?.connected ? "终端未连接" : s.desktopGone ? "电脑端未连接" : "状态待确认",
   };
   const dot = s.status === "waiting_approval" ? "waiting" : s.status;
   return (
@@ -228,7 +228,7 @@ function SessionCard({ s, alert, dim }: { s: SessionSummary; alert?: boolean; di
           {s.title || "会话"}
         </span>
         <span style={{ fontFamily: "var(--mono)", fontSize: 9.5, fontWeight: 700, color: "var(--text-dim)", border: "1px solid rgba(34,28,14,.55)", padding: "1px 6px", borderRadius: 6 }}>
-          CODEX
+          {s.agent === "claude" ? "CLAUDE" : "CODEX"}
         </span>
         <span className={`chip ${s.status}`}>{statusLabel[s.status]}</span>
       </div>

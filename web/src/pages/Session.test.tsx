@@ -48,6 +48,18 @@ beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); useStore.setState({
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("原会话连接不会回落到独立 resume", () => {
+  test("Claude 原终端可发送，不调用 Codex observe/resume；Esc 限制实时禁用输入", async () => {
+    const initial = session({ id: "claude:original", agent: "claude", activeElsewhere: false, status: "idle",
+      terminal: { connected: true, inputBlocked: false, canInterrupt: false, reason: null, permissionMode: "bypassPermissions", originalSessionId: "original" } });
+    mount(initial);
+    expect(screen.getByText("CLAUDE")).toBeTruthy();
+    expect(screen.getByLabelText("消息指令").hasAttribute("disabled")).toBe(false);
+    expect(api.observe).not.toHaveBeenCalled(); expect(api.resume).not.toHaveBeenCalled();
+    act(() => stream.sink?.({ type: "session.terminal", sessionId: initial.id, seq: 1, at: 1,
+      terminal: { ...initial.terminal!, inputBlocked: true, reason: "终端按 Esc 后，请先在电脑输入" } }));
+    await waitFor(() => expect(screen.getByLabelText("消息指令").hasAttribute("disabled")).toBe(true));
+    expect(screen.getByText("终端按 Esc 后，请先在电脑输入")).toBeTruthy();
+  });
   test.each([false, true])("实时连接状态为 %s 且没有事件时，前台仍自动取得模型输出", async (connected) => {
     vi.useFakeTimers(); useStore.setState({ wsConnected: connected });
     const initial = session({ desktopManaged: true, controlMode: "takeover", status: "running" });

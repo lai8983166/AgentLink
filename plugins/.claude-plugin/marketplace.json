@@ -1,0 +1,5 @@
+{
+  "name": "agentlink-local",
+  "owner": { "name": "AgentLink" },
+  "plugins": [{ "name": "agentlink", "source": "./claude-code", "description": "Connect the original Claude terminal to AgentLink" }]
+}

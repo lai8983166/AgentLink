@@ -6,6 +6,29 @@ vi.mock("./runtime", () => ({ api: { sendMessage: vi.fn(), messageReceipt: vi.fn
 beforeEach(() => { vi.mocked(api.sendMessage).mockReset(); vi.mocked(api.messageReceipt).mockReset(); localStorage.clear(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 describe("手机指令草稿与回执", () => {
+  test("Claude 排队与开始执行分开显示，核对不重发且保留新草稿", async () => {
+    vi.useFakeTimers();
+    vi.mocked(api.sendMessage).mockResolvedValue({ ok: true, receipt: { clientMessageId: "q", state: "queued", updatedAt: 1, error: null } });
+    vi.mocked(api.messageReceipt).mockImplementation(async (_id, messageId) => ({ receipt: { clientMessageId: messageId, state: "queued", updatedAt: 1, error: null } }));
+    const { result } = renderHook(() => useMessageOutbox("claude:test"));
+    act(() => result.current.setInput("排队指令"));
+    await act(() => result.current.submit());
+    expect(result.current.input).toBe(""); expect(result.current.messages[0]?.state).toBe("queued");
+    expect(result.current.notice).toContain("等待 Claude");
+    act(() => result.current.setInput("新的草稿"));
+    vi.mocked(api.messageReceipt).mockImplementation(async (_id, messageId) => ({ receipt: { clientMessageId: messageId, state: "accepted", updatedAt: 2, error: null } }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(result.current.messages[0]?.state).toBe("accepted"); expect(result.current.input).toBe("新的草稿");
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+  });
+  test("排队指令后来被终端拒绝会保留原文，并为手动重试准备新的消息 ID", async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue({ ok: true, receipt: { clientMessageId: "q", state: "queued", updatedAt: 1, error: null } });
+    vi.mocked(api.messageReceipt).mockImplementation(async (_id, messageId) => ({ receipt: { clientMessageId: messageId, state: "failed", updatedAt: 2, error: "终端拒绝" } }));
+    const { result } = renderHook(() => useMessageOutbox("claude:test"));
+    act(() => result.current.setInput("不要丢失")); await act(() => result.current.submit());
+    expect(result.current.messages[0]?.state).toBe("failed"); expect(result.current.input).toBe("不要丢失");
+    expect(result.current.uncertain).toBe(false); expect(api.sendMessage).toHaveBeenCalledTimes(1);
+  });
   test("重开时原会话中同 ID 的消息自动解除待确认，不查询或重发旧指令", () => {
     const pending = { id: "m1", text: "继续推进", state: "uncertain" };
     localStorage.setItem("agentlink-outbox:s1", JSON.stringify(pending));

@@ -21,6 +21,7 @@ export function applySessionEvent(current: SessionDetailResponse | undefined, e:
   if (e.seq <= current.latestSeq) return current;
   let session = { ...current.session };
   if (e.type === "session.status") session = { ...session, status: e.status, statusUpdatedAt: e.at };
+  if (e.type === "session.terminal") session = { ...session, terminal: e.terminal };
   if (e.type === "approval.request") {
     const approvals = (session.approvals ?? []).filter((a) => a.approvalId !== e.approvalId);
     approvals.push({ approvalId: e.approvalId, kind: e.kind, command: e.command, cwd: e.cwd,

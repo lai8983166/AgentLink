@@ -33,6 +33,7 @@ export function Session() {
 function SessionView() {
   const { style: viewportStyle, inputFallback } = useKeyboardViewport(true);
   const { sessionId = "" } = useParams();
+  const isClaude = sessionId.startsWith("claude:");
   const [search, setSearch] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -89,7 +90,7 @@ function SessionView() {
       .getQueryData<{ sessions: Array<{ id: string; activeElsewhere: boolean; desktopGone: boolean; desktopManaged?: boolean }> }>(["sessions"])
       ?.sessions.find((s) => s.id === sessionId);
   useEffect(() => {
-    if (!summary) return;
+    if (!summary || isClaude) return;
     let cancelled = false;
     const connected = () => { if (!cancelled) setBusyError(null); };
     const failed = (message: string) => { if (!cancelled) setBusyError(message); };
@@ -214,7 +215,8 @@ function SessionView() {
   const status = session?.status ?? liveStatus?.status ?? "unknown";
   const activity = liveStatus?.activity ?? null;
   const isDesktopBusy = !!session?.desktopManaged || (!!session?.activeElsewhere && !session?.desktopGone);
-  const canDrive = !isDesktopBusy || (takenOver && !session?.desktopGone && status !== "unknown");
+  const canDrive = isClaude ? !!session?.terminal?.connected && !session.terminal.inputBlocked :
+    !isDesktopBusy || (takenOver && !session?.desktopGone && status !== "unknown");
 
   // 滚动跟随
   useEffect(() => {
@@ -261,12 +263,12 @@ function SessionView() {
             <span className={`dot ${status === "waiting_approval" ? "waiting" : status}`} />
             <i className="hash">#</i>
             <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session?.title ?? "会话"}</span>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", border: "1px solid rgba(34,28,14,.55)", padding: "1px 6px", borderRadius: 6 }}>CODEX</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", border: "1px solid rgba(34,28,14,.55)", padding: "1px 6px", borderRadius: 6 }}>{isClaude ? "CLAUDE" : "CODEX"}</span>
           </div>
           <div className="sub">{session?.cwd}</div>
         </div>
         {(status === "running" || status === "waiting_approval") && (
-          <button className="icon-btn" title="中断" disabled={!canDrive || interrupting} onClick={async () => {
+          <button className="icon-btn" title="中断" disabled={!canDrive || interrupting || (isClaude && !session?.terminal?.canInterrupt)} onClick={async () => {
             setInterrupting(true);
             try { await api.interrupt(sessionId); }
             catch (e) { setErrorBanner(e instanceof Error ? e.message : "中断失败，请重试"); }
@@ -295,7 +297,7 @@ function SessionView() {
       )}
 
       {/* 桌面会话：观察/接管/兜底/谱系横幅（任务 5.1-5.3） */}
-      <DesktopBanner
+      {!isClaude && <DesktopBanner
         key={sessionId}
         sessionId={sessionId}
         activeElsewhere={!!session?.activeElsewhere}
@@ -326,7 +328,12 @@ function SessionView() {
           queryClient.invalidateQueries({ queryKey: ["sessions"] });
           navigate(`/${newId}`);
         }}
-      />
+      />}
+      {isClaude && <div role="status" style={{ padding: "9px 16px", borderBottom: "1px solid var(--border)", fontSize: 12, background: session?.terminal?.inputBlocked ? "var(--gold)" : "var(--surface)" }}>
+        {session?.terminal?.connected ? "Claude 原终端会话 · 手机和电脑共用同一会话" : "Claude 终端未连接，请保持电脑终端运行并加载 AgentLink 插件"}
+        <div style={{ marginTop: 4, color: "var(--text-dim)" }}>{session?.terminal?.reason ?? "权限沿用电脑终端；关闭手机不会停止任务"}</div>
+        {session?.terminal?.permissionMode && <div style={{ marginTop: 4 }}>终端权限：{session.terminal.permissionMode}</div>}
+      </div>}
 
       {/* 动作条：当前动作常显 */}
       <div style={{ padding: "4px 16px", fontSize: 11, color: "var(--text-dim)" }}>
@@ -390,7 +397,7 @@ function SessionView() {
               >
                 {h.text}
                 {h.deliveryState && <div style={{ fontSize: 10.5, opacity: 0.75, marginTop: 4 }}>
-                  {{ sending: "发送中", accepted: "电脑端已接收 · 等待同步", failed: "发送失败 · 草稿已保留", uncertain: "接收结果待确认" }[h.deliveryState]}
+                  {{ sending: "发送中", queued: "已排队 · 等待终端开始执行", accepted: "电脑端已接收 · 等待同步", failed: "发送失败 · 草稿已保留", uncertain: "接收结果待确认" }[h.deliveryState]}
                 </div>}
               </div>
             );
@@ -472,7 +479,7 @@ function SessionView() {
           disabled={!canDrive || sending}
           placeholder={
             !canDrive
-              ? "观察模式 · 点上方「接管此会话」后可发指令"
+              ? isClaude ? session?.terminal?.inputBlocked ? "请先在电脑终端输入一条消息" : "等待 Claude 终端连接" : "观察模式 · 点上方「接管此会话」后可发指令"
               : status === "running" || status === "waiting_approval"
                 ? "发送消息…（运行中将排队）"
                 : "发送消息…"
