@@ -1,0 +1,44 @@
+import { expect, test } from "@playwright/test";
+test.beforeEach(async ({ page, request }) => {
+  await request.post("/__test__/control", { data: { type: "reset" } });
+  await request.post("/__test__/control", { data: { type: "seedCatalog" } });
+  await page.addInitScript(() => localStorage.setItem("agentlink-token", "isolated-e2e-token"));
+});
+test("首页近30天，两个全部目录可查旧会话及搜索；原会话返回保留代理入口", async ({ page, request }) => {
+  await page.goto("/");
+  await expect(page.locator("a.card").filter({ hasText: "近期的 Claude 历史" })).toBeVisible();
+  await expect(page.locator("a.card").filter({ hasText: "较早的 Claude 历史" })).toHaveCount(0);
+  await expect(page.locator("a.card").filter({ hasText: "较早的 Codex 历史" })).toHaveCount(0);
+  await page.getByRole("link", { name: "全部 Codex 会话 ›" }).click();
+  await expect(page.locator("a.card").filter({ hasText: "较早的 Codex 历史" })).toBeVisible();
+  await expect(page.locator("a.card").filter({ hasText: "近期的 Claude 历史" })).toHaveCount(0);
+  await page.getByRole("textbox", { name: "搜索全部会话" }).fill("没有匹配项目");
+  await expect(page.getByText("没有匹配的会话")).toBeVisible();
+  await page.getByRole("textbox", { name: "搜索全部会话" }).fill("较早");
+  await page.locator("a.card").filter({ hasText: "较早的 Codex 历史" }).click();
+  await page.locator(".session-header a.back").click();
+  await expect(page).toHaveURL(/view=all&agent=codex/);
+  await page.getByRole("link", { name: "返回最近会话" }).click();
+  await page.getByRole("link", { name: "全部 Claude Code 会话 ›" }).click();
+  await expect(page.locator("a.card").filter({ hasText: "较早的 Claude 历史" })).toBeVisible();
+  await expect(page.locator("a.card").filter({ hasText: "较早的 Codex 历史" })).toHaveCount(0);
+  await page.locator("a.card").filter({ hasText: "较早的 Claude 历史" }).click();
+  await expect(page.getByText("原始历史只读回复", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "继续原会话" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "接管此会话" })).toHaveCount(0);
+  await page.locator(".session-header a.back").click();
+  await expect(page).toHaveURL(/view=all&agent=claude/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const metrics = await (await request.post("/__test__/metrics")).json();
+  expect(metrics.resumeCalls).toBe(0); expect(metrics.forkCalls).toBe(0); expect(metrics.sends).toHaveLength(0);
+});
+test("未加载插件的 Claude 历史只读，原终端连入后同ID开放控制并同步输出", async ({ page, request }) => {
+  await page.goto("/?view=all&agent=claude");
+  await page.locator("a.card").filter({ hasText: "较早的 Claude 历史" }).click();
+  await expect(page.getByRole("textbox")).toBeDisabled();
+  await request.post("/__test__/control", { data: { type: "claudeConnect" } });
+  await expect(page.getByRole("textbox")).toBeEnabled();
+  await expect(page.getByText("电脑终端已有输出", { exact: true })).toBeVisible();
+  expect((await (await request.post("/__test__/metrics")).json()).resumeCalls).toBe(0);
+});

@@ -1,5 +1,5 @@
 // 仅供测试：独立端口、临时数据库、模拟桌面，无 Codex 进程或真实 IPC。
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, websocket, type DaemonApp } from "../daemon/src/server";
@@ -106,7 +106,8 @@ async function build(reset: boolean) {
     fake.notify("thread/status/changed", { threadId, status: { type: "active", activeFlags: [] } });
     fake.notify("item/completed", { threadId, item: { type: "userMessage", id: crypto.randomUUID(), content: params.input } });
   };
-  fixture = createApp({ token, allowedRoots: [root], bridge, auditPath, pushSender: async (_sub, payload) => { notifications.push(JSON.parse(payload)); },
+  const claudeProjectsDir = join(root, "catalog-" + caseNumber);
+  fixture = createApp({ token, allowedRoots: [root], bridge, auditPath, claudeProjectsDir, pushSender: async (_sub, payload) => { notifications.push(JSON.parse(payload)); },
     assertNoWriter: async () => { if (state.writerHeld) throw new DaemonError("SESSION_BUSY", "原会话仍被其他入口持有，请先关闭该会话"); },
     resumeSettings: async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }),
     desktopFactory: (bus, approvals, controls) => new DesktopSessionManager(bus, approvals, {
@@ -116,6 +117,18 @@ async function build(reset: boolean) {
   fixture.app.post("/__test__/control", async (c) => {
     const action = await c.req.json();
     if (action.type === "reset") await build(true);
+    else if (action.type === "seedCatalog") {
+      const directory = join(claudeProjectsDir, "isolated-project"); mkdirSync(directory, { recursive: true });
+      for (const [raw, days, title] of [["12345678-1234-4234-8234-123456789abc", 45, "较早的 Claude 历史"], ["87654321-4321-4321-8321-cba987654321", 3, "近期的 Claude 历史"]] as const) {
+        const timestamp = new Date(Date.now() - days * 86400_000).toISOString();
+        writeFileSync(join(directory, raw + ".jsonl"), [{ type: "user", sessionId: raw, cwd: root, timestamp, uuid: "native-user-" + raw, message: { content: title } },
+          { type: "assistant", sessionId: raw, cwd: root, timestamp, uuid: "native-answer-" + raw, message: { content: [{ type: "text", text: "原始历史只读回复" }] } }].map(row => JSON.stringify(row)).join("\n") + "\n");
+      }
+      fake.threadListResponse = () => ({ data: [
+        { id: "old1", name: "当前 Codex 会话", preview: "test", cwd: root, updatedAt: Math.floor(Date.now() / 1000), originator: "Codex Desktop" },
+        { id: "older-codex", name: "较早的 Codex 历史", preview: "old", cwd: root, updatedAt: Math.floor(Date.now() / 1000) - 45 * 86400, originator: "Codex Desktop" },
+      ] });
+    }
     else if (action.type === "claudeConnect") {
       claudePacket = { protocol: 1, sessionId: "12345678-1234-4234-8234-123456789abc", instanceId: "e2e-original", cwd: root, version: "2.1.314",
         status: "running", turnId: "native-turn", inputBlocked: false, permissionMode: "bypassPermissions", events: [] };
