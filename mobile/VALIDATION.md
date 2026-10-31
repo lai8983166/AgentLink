@@ -59,3 +59,5 @@ Android 14 AOSP、无 Google 服务的隔离模拟器运行在当前 WSL 软件�
 已构建签名 release APK：`io.agentlink.mobile`，版本 `0.2.2`、versionCode `4`，沿用现有签名，minSdk 26、targetSdk 36，v2 签名校验通过。SHA-256：`ca6863d027f98913a6f4203c56bbd793721866a23aa5f4ef4c63dac61a8b4149`。Kotlin 3 项通过。首页近30天、全部 Codex / Claude 目录及搜索需要覆盖安装新版 APK；原生通知、配对与草稿机制未改。
 
 后台/共享包 212 项、前端 154 项通过，全部 TypeScript 和两种页面构建通过。浏览器 86 个不同场景验证通过、2 项桌面触摸跳过；其中旧 PWA 迁移一项在完整运行中超时、单独重跑通过，详见 docs/testing.md。未重复实体手机锁屏、通知或 WebView 验收。
+
+公网下载核对：200、正确 APK MIME，3,736,551 字节，SHA-256 与上述包一致。当前运行中的 Claude 任务触发后台安全重启保护，正式后台升级需等本轮结束；APK 已更新不等于正式后台已启用新历史目录。
