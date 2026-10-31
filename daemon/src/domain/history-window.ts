@@ -16,6 +16,8 @@ export class HistoryWindows {
     const keys = history.map(historyItemKey);
     const candidate = options.revision ? this.manifests.get(options.revision) : undefined;
     let base = candidate?.id === detail.session.id && candidate.epoch === detail.serverEpoch ? candidate : undefined;
+    // 先返回空历史、随后原终端首帧才到达时，也必须从最近一页开始。
+    if (base && base.keys.length === 0 && history.length > 0) base = undefined;
     let start = base ? base.keys.length ? keys.indexOf(base.keys[0]!) : 0 : history.length;
     if (base && start < 0) base = undefined;
     const pageStart = (end: number) => {

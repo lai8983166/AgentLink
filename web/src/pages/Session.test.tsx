@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import type { SessionDetail, SessionEvent } from "@agentlink/shared";
+import type { SessionDetail, SessionEvent, SessionDetailResponse } from "@agentlink/shared";
 import { Session } from "./Session";
 import { api } from "../runtime";
 import { useStore } from "../store";
@@ -12,6 +12,8 @@ const stream = vi.hoisted(() => ({ sink: null as ((e: SessionEvent) => void) | n
 vi.mock("../runtime", () => ({
   api: {
     sessionDetail: vi.fn(),
+    cachedSession: vi.fn().mockResolvedValue(undefined),
+    olderSession: vi.fn(),
     observe: vi.fn().mockResolvedValue({ ok: true }),
     resume: vi.fn().mockResolvedValue({ ok: true }),
     takeover: vi.fn().mockResolvedValue({ ok: true }),
@@ -31,9 +33,9 @@ function session(overrides: Partial<SessionDetail> = {}): SessionDetail {
   };
 }
 
-function mount(initial: SessionDetail) {
+function mount(initial: SessionDetail, historyPage?: SessionDetailResponse["historyPage"]) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
-  client.setQueryData(["session", initial.id], { session: initial, latestSeq: 0 });
+  client.setQueryData(["session", initial.id], { session: initial, latestSeq: 0, historyPage });
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[`/${initial.id}`]}>
@@ -48,6 +50,19 @@ beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); useStore.setState({
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("原会话连接不会回落到独立 resume", () => {
+  test("本地历史只供查看，确认前禁用输入及接管，不自动 resume/observe", async () => {
+    const initial = session({ desktopManaged: true, status: "unknown", controlMode: "observe",
+      history: [{ type: "agentMessage", id: "cached", text: "缓存中的回复", at: 0 }] });
+    const client = mount(initial, { revision: "v1", total: 1600, hasMore: true, oldest: "agentMessage:cached", cached: true });
+    expect(screen.getByText("缓存中的回复")).toBeTruthy();
+    expect((screen.getByRole("textbox") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "接管此会话" })).toBeNull();
+    expect(api.observe).not.toHaveBeenCalled();
+    await act(async () => { client.setQueryData(["session", initial.id], { session: { ...initial, status: "running", controlMode: "takeover" }, latestSeq: 1,
+      historyPage: { revision: "v2", total: 1600, hasMore: true, oldest: "agentMessage:cached" } }); });
+    await waitFor(() => expect((screen.getByRole("textbox") as HTMLInputElement).disabled).toBe(false));
+    expect(api.resume).not.toHaveBeenCalled();
+  });
   test("Claude 原终端可发送，不调用 Codex observe/resume；Esc 限制实时禁用输入", async () => {
     const initial = session({ id: "claude:original", agent: "claude", activeElsewhere: false, status: "idle",
       terminal: { connected: true, inputBlocked: false, canInterrupt: false, reason: null, permissionMode: "bypassPermissions", originalSessionId: "original" } });

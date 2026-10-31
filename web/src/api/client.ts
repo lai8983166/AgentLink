@@ -9,6 +9,8 @@ import type {
   PushDeviceStatus,
   PushSubscriptionInput,
 } from "@agentlink/shared";
+import type { HistoryWindowResponse } from "@agentlink/shared";
+import { HistoryReader } from "../history-reader";
 
 /** daemon REST 客户端：token + 错误 envelope 解析 */
 export class ApiError extends Error {
@@ -23,6 +25,10 @@ export class ApiError extends Error {
 }
 
 export class ApiClient {
+  private history = new HistoryReader(
+    (id, query) => this.request<HistoryWindowResponse>(`/api/v1/sessions/${encodeURIComponent(id)}?${query}`, { cache: "no-store" }),
+    () => JSON.stringify([typeof this.baseUrl === "function" ? this.baseUrl() : this.baseUrl, this.getToken()]),
+  );
   constructor(
     private readonly baseUrl: string | (() => string) = "",
     private readonly getToken: () => string | null,
@@ -76,8 +82,11 @@ export class ApiClient {
     return this.request<SessionListResponse>("/api/v1/sessions");
   }
   sessionDetail(id: string) {
-    return this.request<SessionDetailResponse>(`/api/v1/sessions/${id}`, { cache: "no-store" });
+    return this.history.load(id);
   }
+  cachedSession(id: string) { return this.history.cached(id); }
+  olderSession(id: string) { return this.history.load(id, true); }
+  clearHistory() { this.history.clear(); }
   resume(id: string) {
     return this.request<SessionDetailResponse>(`/api/v1/sessions/${id}/resume`, { method: "POST" });
   }

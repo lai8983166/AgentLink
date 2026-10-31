@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@agentlink/shared": "workspace:*",
     "@capacitor/core": "^8.0.0",
     "@tanstack/react-query": "^5.62.0",
     "react": "^18.3.1",

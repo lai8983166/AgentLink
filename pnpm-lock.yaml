@@ -68,6 +68,9 @@ importers:
 
   web:
     dependencies:
+      '@agentlink/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@capacitor/core':
         specifier: ^8.0.0
         version: 8.5.3

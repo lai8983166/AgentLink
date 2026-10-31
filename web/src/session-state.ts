@@ -1,9 +1,20 @@
-import type { SessionDetailResponse, SessionEvent } from "@agentlink/shared";
+import { historyItemKey, type SessionDetailResponse, type SessionEvent } from "@agentlink/shared";
 import { applyEventToHistory } from "./store";
 
 /** 详情快照与实时事件共享序号，迟到的快照不能覆盖已经收到的事件。 */
 export function mergeSessionDetail(current: SessionDetailResponse | undefined, incoming: SessionDetailResponse): SessionDetailResponse {
-  if (current && current.session.id === incoming.session.id && current.serverEpoch === incoming.serverEpoch && current.latestSeq > incoming.latestSeq) return current;
+  if (current && current.session.id === incoming.session.id && current.serverEpoch === incoming.serverEpoch && current.latestSeq > incoming.latestSeq) {
+    // 翻页期间仍会收到实时输出：只补当前首条之前的旧记录，不回滚状态和新消息。
+    if (incoming.historyPage && current.session.history.length) {
+      const anchor = incoming.session.history.findIndex(item => historyItemKey(item) === historyItemKey(current.session.history[0]!));
+      if (anchor > 0) {
+        const known = new Set(current.session.history.map(historyItemKey));
+        const prefix = incoming.session.history.slice(0, anchor).filter(item => !known.has(historyItemKey(item)));
+        if (prefix.length) return { ...current, historyPage: incoming.historyPage, session: { ...current.session, history: [...prefix, ...current.session.history] } };
+      }
+    }
+    return current;
+  }
   return incoming;
 }
 

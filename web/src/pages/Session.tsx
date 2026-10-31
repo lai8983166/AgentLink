@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SessionDetailResponse, SessionEvent } from "@agentlink/shared";
@@ -54,6 +54,16 @@ function SessionView() {
   const [takenOverId, setTakenOverId] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const eventBacklog = useRef<SessionEvent[]>([]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+  const scrollAnchor = useRef<{ height: number; top: number } | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    void api.cachedSession(sessionId).then(cached => {
+      if (!disposed && cached && !queryClient.getQueryData(["session", sessionId])) queryClient.setQueryData(["session", sessionId], cached);
+    });
+    return () => { disposed = true; };
+  }, [sessionId, queryClient]);
 
   const detailQ = useQuery({
     queryKey: ["session", sessionId],
@@ -91,7 +101,7 @@ function SessionView() {
       .getQueryData<{ sessions: Array<{ id: string; activeElsewhere: boolean; desktopGone: boolean; desktopManaged?: boolean }> }>(["sessions"])
       ?.sessions.find((s) => s.id === sessionId);
   useEffect(() => {
-    if (!summary || isClaude) return;
+    if (!summary || isClaude || detailQ.data?.historyPage?.cached) return;
     let cancelled = false;
     const connected = () => { if (!cancelled) setBusyError(null); };
     const failed = (message: string) => { if (!cancelled) setBusyError(message); };
@@ -125,7 +135,7 @@ function SessionView() {
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, summary?.id, summary?.desktopManaged, summary?.activeElsewhere, takenOver]);
+  }, [sessionId, summary?.id, summary?.desktopManaged, summary?.activeElsewhere, takenOver, detailQ.data?.historyPage?.cached]);
 
   // WS 订阅：事件驱动更新
   useEffect(() => {
@@ -135,6 +145,8 @@ function SessionView() {
 
   function applyEvent(e: SessionEvent) {
     const cached = queryClient.getQueryData<SessionDetailResponse>(["session", sessionId]);
+    // 本地预览尚未确认后台代际：暂存事件，首个 HTTP 基准到达后按序合并。
+    if (cached?.historyPage?.cached) { eventBacklog.current = [...eventBacklog.current, e].slice(-500); return; }
     if (cached && e.seq <= cached.latestSeq) return;
     if (!cached) eventBacklog.current = [...eventBacklog.current, e].slice(-500);
     queryClient.setQueryData<SessionDetailResponse>(["session", sessionId], (old) => applySessionEvent(old, e));
@@ -216,8 +228,26 @@ function SessionView() {
   const status = session?.status ?? liveStatus?.status ?? "unknown";
   const activity = liveStatus?.activity ?? null;
   const isDesktopBusy = !!session?.desktopManaged || (!!session?.activeElsewhere && !session?.desktopGone);
-  const canDrive = isClaude ? !!session?.terminal?.connected && !session.terminal.inputBlocked :
-    !isDesktopBusy || (takenOver && !session?.desktopGone && status !== "unknown");
+  const canDrive = !!session && !detailQ.data?.historyPage?.cached && (isClaude ? !!session?.terminal?.connected && !session.terminal.inputBlocked :
+    !isDesktopBusy || (takenOver && !session?.desktopGone && status !== "unknown"));
+
+  useLayoutEffect(() => {
+    if (!scrollAnchor.current || !scrollRef.current) return;
+    const { height, top } = scrollAnchor.current;
+    scrollRef.current.scrollTop = top + scrollRef.current.scrollHeight - height;
+    scrollAnchor.current = null;
+  });
+  async function loadOlder() {
+    if (loadingOlder) return;
+    setLoadingOlder(true); setOlderError(null); setFollow(false); followState.following = false;
+    try {
+      const incoming = await api.olderSession(sessionId);
+      const el = scrollRef.current;
+      if (el) scrollAnchor.current = { height: el.scrollHeight, top: el.scrollTop };
+      queryClient.setQueryData<SessionDetailResponse>(["session", sessionId], current => mergeSessionDetail(current, incoming));
+    } catch { setOlderError("较早记录加载失败，请重试"); }
+    finally { setLoadingOlder(false); }
+  }
 
   // 滚动跟随
   useEffect(() => {
@@ -298,7 +328,7 @@ function SessionView() {
       )}
 
       {/* 桌面会话：观察/接管/兜底/谱系横幅（任务 5.1-5.3） */}
-      {!isClaude && <DesktopBanner
+      {!isClaude && !detailQ.data?.historyPage?.cached && <DesktopBanner
         key={sessionId}
         sessionId={sessionId}
         activeElsewhere={!!session?.activeElsewhere}
@@ -339,6 +369,7 @@ function SessionView() {
       {/* 动作条：当前动作常显 */}
       <div style={{ padding: "4px 16px", fontSize: 11, color: "var(--text-dim)" }}>
         {wsConnected ? "手机与后台已连接" : "实时连接中 · 定时核对输出"}
+        {detailQ.data?.historyPage?.cached && " · 本地缓存，正在核对最新内容"}
         {session?.desktopManaged && ` · ${session.desktopGone ? "电脑端未连接" : status === "unknown" ? "会话状态待确认" : takenOver ? "原会话可控制" : "原会话观察中"}`}
         {detailQ.dataUpdatedAt ? ` · 内容核对于 ${new Date(detailQ.dataUpdatedAt).toLocaleTimeString()}` : ""}
         <button className="btn ghost" style={{ marginLeft: 8, padding: "3px 7px", fontSize: 11 }}
@@ -371,6 +402,13 @@ function SessionView() {
       {/* 对话流 */}
       <div className="conversation-area">
       <div className="content session-content" data-testid="conversation-history" ref={scrollRef} onScroll={onScroll}>
+        {detailQ.data?.historyPage?.hasMore && <div style={{ textAlign: "center", padding: "10px 0" }}>
+          <button className="btn ghost" disabled={loadingOlder || detailQ.isFetching || detailQ.data.historyPage.cached} onClick={() => void loadOlder()}>
+            {loadingOlder ? "加载中…" : "加载更早记录"}
+          </button>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>已加载 {session?.history.length} / {detailQ.data.historyPage.total} 条记录</div>
+        </div>}
+        {olderError && <div role="status">{olderError}</div>}
         <OlderDeliveries messages={archived} onDismiss={forgetAccepted} />
         {history.map((h) => {
           if (h.type === "userMessage") {

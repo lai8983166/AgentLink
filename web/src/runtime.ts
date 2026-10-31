@@ -12,6 +12,9 @@ export const queryClient = new QueryClient({
     queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 5000 },
   },
 });
+useStore.subscribe((next, previous) => {
+  if (next.token !== previous.token) { api.clearHistory(); queryClient.clear(); }
+});
 
 export const ws = new WsClient(() => {
   const token = useStore.getState().token;
