@@ -6,6 +6,15 @@ vi.mock("./runtime", () => ({ api: { sendMessage: vi.fn(), messageReceipt: vi.fn
 beforeEach(() => { vi.mocked(api.sendMessage).mockReset(); vi.mocked(api.messageReceipt).mockReset(); localStorage.clear(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 describe("手机指令草稿与回执", () => {
+  test("权威历史确认排队指令后，撤销仍在等待执行的旧提示", async () => {
+    const record = { id: "q1", text: "继续", state: "queued", at: 1, afterId: null, knownUserIds: [] };
+    localStorage.setItem("agentlink-messages:claude:test", JSON.stringify([record]));
+    vi.mocked(api.messageReceipt).mockResolvedValue({ receipt: null });
+    const { result } = renderHook(() => useMessageOutbox("claude:test", { history: () => [{ type: "userMessage", id: "q1", clientMessageId: "q1", text: "继续", at: 2 }] }));
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.notice).toBe("已从原会话确认执行");
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
   test("Claude 排队与开始执行分开显示，核对不重发且保留新草稿", async () => {
     vi.useFakeTimers();
     vi.mocked(api.sendMessage).mockResolvedValue({ ok: true, receipt: { clientMessageId: "q", state: "queued", updatedAt: 1, error: null } });

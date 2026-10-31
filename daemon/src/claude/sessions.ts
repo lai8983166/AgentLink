@@ -34,8 +34,8 @@ export class ClaudeSessions {
       s.lastSeen = 0;
       s.session.status = "unknown";
       if (s.session.terminal) Object.assign(s.session.terminal, { connected: false, canInterrupt: false, reason: DISCONNECTED });
-      // A previous permission HTTP callback cannot survive a daemon restart.
-      for (const a of s.approvals) a.state = "closed";
+      // The HTTP callback is gone, but the native terminal's hook survives.
+      // It can re-establish its wait with the same instance and request ID.
       s.session.approvals = [];
       s.session.pendingApprovals = 0;
       this.states.set(s.session.id, s);
@@ -158,6 +158,8 @@ export class ClaudeSessions {
     this.fs.resolveAllowed(p.cwd);
     const id = CLAUDE_PREFIX + p.sessionId;
     let s = this.states.get(id);
+    const before = s ? JSON.stringify({ status: s.session.status, terminal: s.session.terminal }) : "";
+    let consumed = false;
     if (s && s.instanceId !== p.instanceId) {
       if (s.retired.includes(p.instanceId) || this.now() - s.lastSeen < 6000) throw new DaemonError("SESSION_BUSY", "原终端实例仍在线，拒绝竞争连接");
       s.retired = [...s.retired, s.instanceId].slice(-32);
@@ -180,7 +182,7 @@ export class ClaudeSessions {
     const previousTerminal = JSON.stringify(s.session.terminal);
     s.lastSeen = this.now();
     s.session.terminal = { connected: true, inputBlocked: p.inputBlocked, canInterrupt: !!p.turnId,
-      reason: p.inputBlocked ? BLOCKED : p.status === "unknown" ? "原终端已连接，等待轮次状态；可发送消息" : null,
+      reason: p.inputBlocked ? BLOCKED : p.nativeInteraction || (p.status === "unknown" ? "原终端已连接，等待轮次状态；可发送消息" : null),
       permissionMode: p.permissionMode, originalSessionId: p.sessionId };
     if (previousTerminal !== JSON.stringify(s.session.terminal)) this.publish(id, { type: "session.terminal", terminal: { ...s.session.terminal } });
     if (p.turnId) this.activeTurns.set(id, p.turnId); else this.activeTurns.delete(id);
@@ -188,10 +190,12 @@ export class ClaudeSessions {
       if (event.seq <= s.cursor) continue;
       this.consume(s, event);
       s.cursor = event.seq;
+      consumed = true;
     }
     this.status(s, p.status);
     this.syncApprovals(s);
-    this.save(s); this.listEvent(s);
+    // Idle heartbeats update liveness in memory without rewriting chat history.
+    if (consumed || before !== JSON.stringify({ status: s.session.status, terminal: s.session.terminal })) { this.save(s); this.listEvent(s); }
     const events = this.deferred;
     this.deferred = null;
     for (const send of events) send();
@@ -221,7 +225,7 @@ export class ClaudeSessions {
       }
       case "completed":
         if (!d.agentId) {
-          this.status(s, d.isAborted ? "idle" : "done");
+          this.status(s, d.isError ? "error" : d.isAborted ? "idle" : "done");
           s.session.preview = str("answer").slice(0, 120); s.session.lastActivityAt = at;
           for (const a of s.approvals) this.endApproval(s, a, "expired");
         }

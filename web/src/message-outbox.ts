@@ -55,6 +55,7 @@ export function useMessageOutbox(sessionId: string, options: { history?: () => H
       item.type === "userMessage" && (item.clientMessageId === message.id || item.id === message.id) && item.text.trim() === message.text.trim());
     const next = current.filter((message) => message.state === "accepted" || message.state === "queued" ? !confirmed.has(message.id) :
       message.state !== "uncertain" || !exact(message));
+    if (current.some(message => message.state === "queued" && confirmed.has(message.id))) setNotice("已从原会话确认执行");
     if (next.length !== current.length) saveMessages(next);
     if (outboxRef.current.state === "uncertain" && exact(outboxRef.current)) {
       save(empty()); setNotice("已从原会话确认接收");

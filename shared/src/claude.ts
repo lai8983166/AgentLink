@@ -12,6 +12,7 @@ export const ClaudeExchange = z.object({
   turnId: z.string().max(200).nullable(),
   inputBlocked: z.boolean(),
   permissionMode: z.string().max(100).nullable(),
+  nativeInteraction: z.string().max(300).nullable().optional(),
   events: z.array(z.object({
     seq: z.number().int().positive(),
     type: z.enum(["connected", "user", "started", "text", "completed", "interrupted", "failed", "tool", "toolEnd", "approval", "approvalEnd", "command", "snapshot", "gap"]),

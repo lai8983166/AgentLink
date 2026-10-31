@@ -71,3 +71,14 @@ test('stream chunks and final native result pass through unchanged', async ($, o
   expect((await stream.next()).value.text).toBe('READY');
   expect((await stream.next()).value.answer).toBe('READY');
 });
+test('native API failure cannot be overwritten by a later turn.complete', async ($, on) => {
+  const { packets, clock } = host(on);
+  on('classic.StopFailure', () => ({}));
+  on('turn.complete', () => ({ text: '' }));
+  await $.session.start(START);
+  await $.classic.StopFailure({ session_id: '12345678-1234-4234-8234-123456789abc', transcript_path: '/isolated/log', cwd: '/isolated', hook_event_name: 'StopFailure', error: 'unknown', error_details: 'Fixture API failure' });
+  await $.turn.complete({ turnId: 't', answer: '', durationMs: 1, isAborted: false, usage: null });
+  await clock.advance(500);
+  expect(packets.at(-1).status).toBe('error');
+  expect(packets.flatMap(p => p.events ?? []).find(e => e.type === 'completed').data.isError).toBe(true);
+});

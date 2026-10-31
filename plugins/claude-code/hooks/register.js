@@ -6,6 +6,7 @@ let turnId = null;
 let status = 'unknown';
 let permissionMode = null;
 let inputBlocked = false;
+let failedTurn = false;
 let sequence = 0;
 let outbox = [];
 let pumping = false;
@@ -14,6 +15,7 @@ const executed = new Set();
 const remoteStops = new Set();
 const activeTools = new Map();
 const approvals = new Map();
+const nativeInteractions = new Set();
 
 function emit(type, data) {
   if (identity) outbox.push({ seq: ++sequence, type, data });
@@ -80,7 +82,8 @@ async function pump($) {
   const batch = outbox.splice(0, 256);
   try {
     if (!connection) connection = await loadConnection($);
-    const reply = await request($, '/exchange', { status, turnId, inputBlocked, permissionMode, events: batch });
+    const reply = await request($, '/exchange', { status, turnId, inputBlocked, permissionMode, events: batch,
+      nativeInteraction: nativeInteractions.size ? 'Claude 正在等待提问或计划确认，请在电脑终端处理' : null });
     acknowledged = Math.max(acknowledged, reply.ack ?? 0);
     for (const command of reply.commands ?? []) await execute($, command);
   } catch {
@@ -129,7 +132,7 @@ export function register(on) {
     return next(e);
   });
   on('turn.start', async ($, e, next) => {
-    if (!e.agentId) { turnId = e.turnId; status = 'running'; emit('started', { turnId }); }
+    if (!e.agentId) { turnId = e.turnId; failedTurn = false; status = 'running'; emit('started', { turnId }); }
     return next(e);
   });
   on('turn.step', async function* ($, e, next) {
@@ -145,16 +148,16 @@ export function register(on) {
     if (!e.agentId) {
       inputBlocked = !!e.isAborted && !remoteStops.has(e.turnId);
       remoteStops.delete(e.turnId);
-      turnId = null; status = e.isAborted ? 'idle' : 'done';
-      emit('completed', { turnId: e.turnId, answer: e.answer, isAborted: e.isAborted });
+      turnId = null; status = failedTurn ? 'error' : e.isAborted ? 'idle' : 'done';
+      emit('completed', { turnId: e.turnId, answer: e.answer, isAborted: e.isAborted, isError: failedTurn });
     }
     const result = await next(e);
     if (!e.agentId) await snapshot($);
     return result;
   });
   on('classic.StopFailure', async ($, e, next) => {
-    status = 'error'; turnId = null;
-    emit('failed', { message: String(e.error ?? e.message ?? 'Claude 本轮出错') });
+    failedTurn = true; status = 'error'; turnId = null;
+    emit('failed', { message: String(e.error_details ?? e.error ?? 'Claude 本轮出错') });
     return next(e);
   });
   on('tool.check', async ($, e, next) => {
@@ -163,6 +166,7 @@ export function register(on) {
   });
   on('classic.PermissionRequest', async ($, e, next) => {
     if (!identity || !connection) return next(e);
+    if (/^(AskUserQuestion|ExitPlanMode|EnterPlanMode)$/.test(e.tool_name)) return next(e);
     permissionMode = e.permission_mode ?? permissionMode;
     const matches = [...activeTools].filter(([, t]) => t.name === e.tool_name && t.key === fingerprint(e.tool_input));
     // Ambiguous concurrent identical tools keep their native permission dialog.
@@ -181,8 +185,20 @@ export function register(on) {
         await pump($);
       }
       if (acknowledged < requestSequence) return next(e);
+      let failures = 0;
       while (!next.signal.aborted && approvals.has(approvalId)) {
-        const reply = await request($, '/approval/wait', { approvalId });
+        let reply;
+        try {
+          reply = await request($, '/approval/wait', { approvalId });
+          failures = 0;
+        } catch (error) {
+          // A local daemon restart does not end the native permission request.
+          // Bound sleeps to the mod host budget, then retain the native dialog.
+          if (++failures > 15) throw error;
+          connection = await loadConnection($);
+          await $.clock.sleep(100);
+          continue;
+        }
         if (reply.decision === 'allow' || reply.decision === 'deny') return { decision: {
           behavior: reply.decision,
           ...(reply.decision === 'deny' ? { message: '用户在 AgentLink 拒绝了此操作' } : {}),
@@ -198,6 +214,7 @@ export function register(on) {
   });
   on('tool.call', async ($, e, next) => {
     const name = e.tool, itemId = e.tool_use_id;
+    if (/^(AskUserQuestion|ExitPlanMode|EnterPlanMode)$/.test(name)) nativeInteractions.add(itemId);
     const { tool, tool_use_id, agentId, ...input } = e;
     emit('tool', { itemId, name, input });
     try {
@@ -207,6 +224,7 @@ export function register(on) {
       return result;
     } finally {
       activeTools.delete(itemId);
+      nativeInteractions.delete(itemId);
       for (const [approvalId, toolId] of approvals) if (toolId === itemId) {
         approvals.delete(approvalId); emit('approvalEnd', { approvalId });
       }

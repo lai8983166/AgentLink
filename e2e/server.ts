@@ -7,6 +7,7 @@ import { CodexBridge, DaemonError } from "../daemon/src/codex/bridge";
 import { FakeCodexServer } from "../daemon/src/testing/fake-codex";
 import { DesktopSessionManager } from "../daemon/src/ipc/desktop-manager";
 import { IpcClient, type PipeLikeSocket } from "../daemon/src/ipc/client";
+import type { ClaudeExchange, ClaudeEvent } from "@agentlink/shared";
 
 const token = "isolated-e2e-token";
 const root = mkdtempSync(join(tmpdir(), "agentlink-e2e-"));
@@ -17,6 +18,16 @@ const legacyPage = '<!doctype html><html><head><meta charset="utf-8"><meta name=
 let caseNumber = 0;
 let auditPath = "";
 let fixture: DaemonApp;
+let claudePacket: ClaudeExchange | null = null;
+let claudeLive = false;
+let claudeSeq = 0;
+let claudeSends: string[] = [];
+let claudeDecisions: string[] = [];
+function claudeEvent(type: ClaudeEvent["type"], data: Record<string, unknown> = {}) {
+  if (!claudePacket) throw new Error("Claude fixture not connected");
+  return fixture.claude.exchange({ ...claudePacket, events: [{ seq: ++claudeSeq, type, data }] });
+}
+setInterval(() => { if (claudeLive && claudePacket) fixture.claude.exchange({ ...claudePacket, events: [] }); }, 500).unref();
 let pipes: TestPipe[] = [];
 const sockets = new Set<{ close(code?: number, reason?: string): void }>();
 let state: { revision: number; requests: unknown[]; status: string; items: unknown[]; approvalReject: boolean; sends: string[]; approvalMethods: string[];
@@ -78,9 +89,12 @@ function commandRequest(id: number, kind = "command") {
     params: { command: kind === "command" ? "echo E2E" : null, cwd: "F:/e2e", availableDecisions: ["accept", "decline"] } };
 }
 async function build(reset: boolean) {
+  claudePacket = null; claudeLive = false;
+  fixture?.claude.close();
   fixture?.push.stop(); fixture?.limitsRefresh.stop(); fixture?.desktop?.shutdown(); fixture?.bridge.stop(); fixture?.audit.close(); fixture?.controls.close();
   await fixture?.push.close();
   if (reset) {
+    claudeSeq = 0; claudeSends = []; claudeDecisions = [];
     pwaVersion = null;
     auditPath = join(root, String(++caseNumber), "audit.db");
     state = { revision: 1, requests: [commandRequest(2)], status: "inProgress", items: [], approvalReject: false, sends: [], approvalMethods: [], delayedMessages: false, turns: [], ownerAvailable: true, ownerError: null, writerHeld: false };
@@ -102,6 +116,44 @@ async function build(reset: boolean) {
   fixture.app.post("/__test__/control", async (c) => {
     const action = await c.req.json();
     if (action.type === "reset") await build(true);
+    else if (action.type === "claudeConnect") {
+      claudePacket = { protocol: 1, sessionId: "12345678-1234-4234-8234-123456789abc", instanceId: "e2e-original", cwd: root, version: "2.1.314",
+        status: "running", turnId: "native-turn", inputBlocked: false, permissionMode: "bypassPermissions", events: [] };
+      claudeLive = true;
+      claudeEvent("connected");
+      claudeEvent("user", { text: "终端发起的任务" });
+      claudeEvent("text", { itemId: "native-answer", text: "电脑终端已有输出" });
+    }
+    else if (action.type === "claudeComplete") {
+      const commands = fixture.claude.exchange({ ...claudePacket!, events: [] }).commands;
+      if (!commands.length) { claudePacket!.status = "done"; claudePacket!.turnId = null; claudeEvent("completed", { answer: "终端任务已完成", isAborted: false }); }
+      for (const cmd of commands) {
+        claudeSends.push(cmd.id); claudePacket!.status = "running"; claudePacket!.turnId = "turn-" + cmd.id;
+        claudeEvent("started", { turnId: claudePacket!.turnId });
+        claudeEvent("command", { commandId: cmd.id, state: "started" });
+        claudeEvent("text", { itemId: "answer-" + cmd.id, text: "Claude 手机" });
+        claudeEvent("text", { itemId: "answer-" + cmd.id, text: "控制成功" });
+        claudePacket!.status = "done"; claudePacket!.turnId = null;
+        claudeEvent("completed", { answer: "Claude 手机控制成功", isAborted: false });
+      }
+    }
+    else if (action.type === "claudeApproval") {
+      claudePacket!.status = "waiting_approval";
+      claudeEvent("approval", { approvalId: "claude-approval", name: "Bash", input: { command: "echo CLAUDE" } });
+      const owner = claudePacket;
+      void fixture.claude.waitApproval(owner!.sessionId, owner!.instanceId, "claude-approval").then(reply => {
+        if (owner !== claudePacket) return;
+        if (reply.decision) claudeDecisions.push(reply.decision);
+        claudePacket!.status = "running"; claudeEvent("approvalEnd", { approvalId: "claude-approval" });
+      });
+    }
+    else if (action.type === "claudeLocalApproval") { claudePacket!.status = "running"; claudeEvent("approvalEnd", { approvalId: "claude-approval" }); }
+    else if (action.type === "claudeBlocked") {
+      claudePacket!.inputBlocked = true; claudePacket!.status = "idle"; claudePacket!.turnId = null;
+      claudeEvent("completed", { answer: "", isAborted: true });
+    }
+    else if (action.type === "claudeUnblock") { claudePacket!.inputBlocked = false; claudeEvent("user", { text: "电脑终端恢复输入" }); }
+    else if (action.type === "claudeDisconnect") claudeLive = false;
     else if (action.type === "pwaVersion") pwaVersion = action.version;
     else if (action.type === "restart") { await build(false); for (const socket of sockets) socket.close(1012, "fixture restart"); }
     else if (action.type === "rejectApproval") state.approvalReject = action.enabled;
@@ -142,7 +194,7 @@ async function build(reset: boolean) {
     }
     return c.json({ ok: true });
   });
-  fixture.app.post("/__test__/metrics", (c) => c.json({ sends: state.sends, approvalMethods: state.approvalMethods, notifications,
+  fixture.app.post("/__test__/metrics", (c) => c.json({ sends: state.sends, claudeSends, claudeDecisions, approvalMethods: state.approvalMethods, notifications,
     resumeCalls: fake.written.filter((line) => JSON.parse(line).method === "thread/resume").length,
     resumes: fake.written.map((line) => JSON.parse(line)).filter((m) => m.method === "thread/resume").map((m) => m.params),
     localSends: fake.written.map((line) => JSON.parse(line)).filter((m) => m.method === "turn/start").map((m) => m.params),

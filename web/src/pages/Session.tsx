@@ -23,6 +23,7 @@ const STATUS_LABEL: Record<string, string> = {
   idle: "空闲",
   unknown: "状态待确认",
 };
+const CLAUDE_MODE: Record<string, string> = { default: "手动审批", manual: "手动审批", bypassPermissions: "完全访问", acceptEdits: "自动接受文件修改", auto: "自动审批", plan: "计划模式", dontAsk: "仅允许预先授权的操作" };
 
 /** 会话页（任务 7.4/7.5）：动作条常显 + 流式 + 工具卡片 + 审批 + 排队 + 滚动跟随 */
 export function Session() {
@@ -332,7 +333,7 @@ function SessionView() {
       {isClaude && <div role="status" style={{ padding: "9px 16px", borderBottom: "1px solid var(--border)", fontSize: 12, background: session?.terminal?.inputBlocked ? "var(--gold)" : "var(--surface)" }}>
         {session?.terminal?.connected ? "Claude 原终端会话 · 手机和电脑共用同一会话" : "Claude 终端未连接，请保持电脑终端运行并加载 AgentLink 插件"}
         <div style={{ marginTop: 4, color: "var(--text-dim)" }}>{session?.terminal?.reason ?? "权限沿用电脑终端；关闭手机不会停止任务"}</div>
-        {session?.terminal?.permissionMode && <div style={{ marginTop: 4 }}>终端权限：{session.terminal.permissionMode}</div>}
+        {session?.terminal?.permissionMode && <div style={{ marginTop: 4 }}>终端权限：{CLAUDE_MODE[session.terminal.permissionMode] ?? "沿用终端设置"}</div>}
       </div>}
 
       {/* 动作条：当前动作常显 */}

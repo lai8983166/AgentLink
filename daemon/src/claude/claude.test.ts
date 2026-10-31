@@ -108,6 +108,17 @@ test("无需手机订阅，终端完成入安卓通知队列，断线不会产�
   expect(jobs).toHaveLength(1); expect(jobs[0]?.notification.url).toBe("/" + encodeURIComponent(f.id));
   f.exchange(); expect(await push.nativeInbox(device, undefined, 0)).toHaveLength(1);
 });
+test("同一个原终端的未决审批可在后台重启后重新建立等待，不自动批准", async () => {
+  const f = setup(true);
+  f.packet.status = "waiting_approval";
+  f.exchange("approval", { approvalId: "surviving", name: "Bash", input: { command: "echo safe" } });
+  const before = f.service.waitApproval(f.raw, "original", "surviving");
+  f.restart(); expect(await before).toEqual({ state: "closed" });
+  f.exchange();
+  const after = f.service.waitApproval(f.raw, "original", "surviving");
+  f.service.decide(f.id, "surviving", "decline");
+  expect(await after).toEqual({ state: "decided", decision: "deny" });
+});
 test("快照逐条复用重复文本的关联 ID，工具不冒充命令", () => {
   const prior: HistoryItem[] = [ { type: "userMessage", id: "m1", clientMessageId: "m1", text: "继续", at: 1 }, { type: "userMessage", id: "m2", clientMessageId: "m2", text: "继续", at: 2 } ];
   const result = mergeClaudeHistory([{ role: "user", text: "继续" }, { role: "user", text: "继续" }, { role: "assistant", text: "", toolUses: [{ id: "tool", name: "Read", input: { file_path: "a.txt" }, isError: false }] }], prior, 3);
