@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing';
 
-function connected(on, config = {}) {
+function connected(on, config = {}, respond = null) {
   const clock = mock.clock(on);
   mock.env(on, { AGENTLINK_CLAUDE_PROBE_URL: 'http://127.0.0.1:12345', AGENTLINK_CLAUDE_PROBE_TOKEN: 'test-only', ...config });
   const batches = [];
@@ -9,9 +9,13 @@ function connected(on, config = {}) {
   on('session.id', () => ({ value: 'original-session' }));
   on('session.version', () => ({ value: { base: '2.1.314' } }));
   on('command.register', () => ({ value: { command: 'agentlink-probe' } }));
-  on('http.fetch', ($, e) => {
+  on('http.fetch', async ($, e) => {
     const body = JSON.parse(e.init.body);
     batches.push({ path: e.url, ...body });
+    if (respond) {
+      const response = await respond(e.url, body);
+      if (response) return { value: response };
+    }
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(e.url.endsWith('/approval/wait') ? { decision: 'allow' } : { commands: queued.splice(0) }) } };
   });
   return { clock, batches, queued };
@@ -96,7 +100,43 @@ test('remote permission decision uses the native PermissionRequest schema', asyn
   const { clock, batches } = connected(on, { AGENTLINK_CLAUDE_PROBE_APPROVALS: '1' });
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
   const result = await $.classic.PermissionRequest({ session_id: 'original-session', transcript_path: '/test/log', cwd: '/test', hook_event_name: 'PermissionRequest', permission_mode: 'manual', tool_name: 'Bash', tool_input: { command: 'echo READY' } });
-  expect(result.hookSpecificOutput.decision.behavior).toBe('allow');
+  expect(result.decision.behavior).toBe('allow');
   await clock.advance(250);
   expect(batches.flatMap(b => b.events ?? []).some(e => e.type === 'approval.closed')).toBe(true);
+});
+
+test('exchange failure retries the same event sequence before accepting controls', async ($, on) => {
+  let failed = false;
+  const { clock, batches } = connected(on, {}, () => {
+    if (!failed) { failed = true; return { status: 503, ok: false, headers: {}, text: '{}' }; }
+    return null;
+  });
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+  await clock.advance(250);
+  expect(batches[0].events[0].seq).toBe(batches[1].events[0].seq);
+  expect(batches[1].events[0].type).toBe('session.connected');
+});
+
+test('successful programmatic interrupt clears running state even without turn.complete', async ($, on) => {
+  const { clock, batches, queued } = connected(on);
+  on('turn.start', ($, e) => ({ turnId: e.turnId }));
+  on('turn.abort', () => ({ value: undefined }));
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+  await $.turn.start({ turnId: 'current' });
+  queued.push({ id: 'stop', kind: 'interrupt', turnId: 'current' });
+  await clock.advance(500);
+  expect(batches.at(-1).status).toBe('idle');
+  expect(batches.at(-1).turnId).toBe(null);
+  expect(batches.flatMap(b => b.events ?? []).some(e => e.type === 'turn.interrupted')).toBe(true);
+});
+
+test('permission correlation uses native tool identity and canonical input', async ($, on) => {
+  const { clock, batches } = connected(on, { AGENTLINK_CLAUDE_PROBE_APPROVALS: '1' });
+  on('tool.check', () => ({ decision: 'ask' }));
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+  await $.tool.check({ tool: 'Bash', tool_use_id: 'tool-1', input: { command: 'echo READY', description: 'Test' } });
+  await $.classic.PermissionRequest({ session_id: 'original-session', transcript_path: '/test/log', cwd: '/test', hook_event_name: 'PermissionRequest', permission_mode: 'default', tool_name: 'Bash', tool_input: { description: 'Test', command: 'echo READY' } });
+  await clock.advance(250);
+  const events = batches.flatMap(b => b.events ?? []);
+  expect(events.find(e => e.type === 'approval.request').correlation).toBe('exact');
 });

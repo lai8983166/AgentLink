@@ -4,13 +4,21 @@ let endpoint = null;
 let token = null;
 let identity = null;
 let turnId = null;
-let status = 'idle';
+// A hot-loaded mod cannot infer the current turn from a startup event.
+let status = 'unknown';
 let sequence = 0;
 let outbox = [];
 let pumping = false;
 let remoteApprovals = false;
 const commands = new Set();
 const pendingApprovals = new Map();
+const activeTools = new Map();
+
+function fingerprint(value) {
+  if (Array.isArray(value)) return '[' + value.map(fingerprint).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + fingerprint(value[k])).join(',') + '}';
+  return JSON.stringify(value);
+}
 
 function emit(type, data) {
   if (!identity) return;
@@ -36,7 +44,7 @@ async function execute($, command) {
   if (commands.has(command.id)) return;
   commands.add(command.id);
   if (command.kind === 'send') {
-    emit('command.queued', { commandId: command.id });
+    emit('command.queued', { commandId: command.id, text: command.text });
     // Do not await from the pump: submit waits for idle / start of the turn.
     $.prompt.submit({ text: command.text, asUser: true }).then(
       result => finishCommand($, command, result?.drop
@@ -50,7 +58,11 @@ async function execute($, command) {
       emit('command.result', { commandId: command.id, state: 'rejected', reason: 'Turn changed' });
       return;
     }
-    await $.turn.abort({ turnId });
+    const stoppedTurnId = turnId;
+    await $.turn.abort({ turnId: stoppedTurnId });
+    // Programmatic abort need not produce turn.complete in the native host.
+    if (turnId === stoppedTurnId) { turnId = null; status = 'idle'; }
+    emit('turn.interrupted', { turnId: stoppedTurnId });
     emit('command.result', { commandId: command.id, state: 'interrupted' });
   } else if (command.kind === 'snapshot') {
     const messages = await $.session.messages();
@@ -137,12 +149,21 @@ export function register(on) {
     return next(e);
   });
 
+  on('tool.check', async ($, e, next) => {
+    // Unlike classic.PreToolUse (a flat ToolCallEnvelope), tool.check exposes
+    // the permission input directly, plus the real call's tool_use_id.
+    if (e.tool_use_id) activeTools.set(e.tool_use_id, { tool: e.tool, input: fingerprint(e.input) });
+    return next(e);
+  });
+
   on('classic.PermissionRequest', async ($, e, next) => {
     if (!identity) return next(e);
     const approvalId = identity.instanceId + ':' + (++sequence);
-    pendingApprovals.set(approvalId, e.tool_name);
+    const matches = [...activeTools].filter(([, tool]) => tool.tool === e.tool_name && tool.input === fingerprint(e.tool_input));
+    const toolUseId = matches.length === 1 ? matches[0][0] : null;
+    pendingApprovals.set(approvalId, { toolUseId });
     status = 'waiting_approval';
-    emit('approval.request', { approvalId, tool: e.tool_name, input: e.tool_input, permissionMode: e.permission_mode });
+    emit('approval.request', { approvalId, tool: e.tool_name, input: e.tool_input, permissionMode: e.permission_mode, correlation: toolUseId ? 'exact' : 'unavailable' });
     if (!remoteApprovals) return next(e);
     try {
       // The broker bounds this wait. Failure leaves the native prompt available.
@@ -151,10 +172,12 @@ export function register(on) {
       });
       if (reply.decision === 'allow' || reply.decision === 'deny') {
         emit('approval.remote_decision', { approvalId, decision: reply.decision });
-        return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: {
+        // Mod classic.* results are flattened. The shell-hook JSON envelope
+        // (hookSpecificOutput) is silently ignored by the real mod host.
+        return { decision: {
           behavior: reply.decision,
           ...(reply.decision === 'deny' ? { message: 'Declined from AgentLink verification tool' } : {}),
-        } } };
+        } };
       }
       return next(e);
     } catch {
@@ -162,7 +185,7 @@ export function register(on) {
     } finally {
       pendingApprovals.delete(approvalId);
       emit('approval.closed', { approvalId });
-      status = turnId ? 'running' : 'idle';
+      status = pendingApprovals.size ? 'waiting_approval' : turnId ? 'running' : 'idle';
     }
   });
   on('tool.call', async ($, e, next) => {
@@ -170,9 +193,14 @@ export function register(on) {
     try { return await next(e); }
     finally {
       // Native approval may win while the HTTP hook is waiting.
-      for (const [id, tool] of pendingApprovals) {
-        if (tool === e.tool) emit('approval.invalidate', { approvalId: id });
+      for (const [id, approval] of pendingApprovals) {
+        if (approval.toolUseId && approval.toolUseId === e.tool_use_id) {
+          emit('approval.invalidate', { approvalId: id });
+          pendingApprovals.delete(id);
+        }
       }
+      activeTools.delete(e.tool_use_id);
+      if (!pendingApprovals.size && status === 'waiting_approval') status = turnId ? 'running' : 'idle';
       emit('tool.finished', { tool: e.tool });
     }
   });

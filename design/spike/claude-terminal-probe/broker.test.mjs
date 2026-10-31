@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname, basename, resolve } from 'node:path';
 import { startBroker } from './broker.mjs';
 
 async function fixture(t, options = {}) {
@@ -78,5 +78,10 @@ test('broker restart preserves instance, pending command and event deduplication
     const reply = await (await post(data)).json();
     assert.equal(reply.commands.length, 1);
     assert.equal(b.sessions.get('s').events.length, 1);
-  } finally { if (b) await b.close(); rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    if (b) await b.close();
+    assert.equal(dirname(resolve(dir)), resolve(tmpdir()));
+    assert(basename(dir).startsWith('agentlink-claude-broker-'));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
