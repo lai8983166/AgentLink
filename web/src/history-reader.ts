@@ -79,6 +79,11 @@ export class HistoryReader {
     if (new Set(historySync.order).size !== historySync.order.length || historySync.order.some(key => !items.has(key))) return undefined;
     return { ...detail, session: { ...detail.session, history: historySync.order.map(key => items.get(key)!) } };
   }
+  snapshot(wire: HistoryWindowResponse): SessionDetailResponse {
+    const detail = this.merge(undefined, wire);
+    if (!detail) throw new Error("会话快照不完整，请刷新核对");
+    return detail;
+  }
   clear() {
     this.generation++; this.values.clear(); this.reads.clear(); this.pending.clear();
     void this.cache.clear().catch(() => {});

@@ -161,6 +161,10 @@ async function build(reset: boolean) {
     else if (action.type === "resumeConflict") fake.resumeError = "thread already has an active writer";
     else if (action.type === "fileApproval") { state.requests = [commandRequest(3, "fileChange")]; state.revision++; push(); }
     else if (action.type === "done") { state.status = "completed"; state.requests = []; state.revision++; push(); }
+    else if (action.type === "longHistory") {
+      state.items = Array.from({ length: 1600 }, (_, i) => ({ id: "long-" + i, type: "agentMessage", text: "历史记录 " + i + "\n" + "完整内容 ".repeat(150), status: "completed" }));
+      state.status = "completed"; state.requests = []; state.revision++; push();
+    }
     else if (action.type === "running") { state.status = "inProgress"; state.requests = []; state.revision++; push(); }
     else if (action.type === "delayMessages") state.delayedMessages = true;
     else if (action.type === "uncertainReceipt") fixture.controls.saveDelivery("old1", action.text, {

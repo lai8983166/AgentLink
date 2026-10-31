@@ -45,10 +45,25 @@ test("空历史随后有内容、错误会话版本不复用，单页字节预�
   const empty = windows.window(source); expect(empty.historyPage!.hasMore).toBe(false);
   source.session.history = detail(3).session.history;
   expect(windows.window(source, { revision: empty.historyPage!.revision }).session.history).toHaveLength(3);
+  source.session.history = detail().session.history;
+  expect(windows.window(source, { revision: empty.historyPage!.revision }).session.history).toHaveLength(60);
   source.session.id = "other";
   expect(windows.window(source, { revision: empty.historyPage!.revision }).historySync.mode).toBe("replace");
   source.session.history = Array.from({ length: 3 }, (_, i) => ({ type: "agentMessage", id: String(i), text: "x".repeat(300_000), at: i }));
   const large = windows.window(source);
   expect(large.session.history).toHaveLength(1); expect(large.historyPage!.hasMore).toBe(true);
   expect(large.session.history[0]!.type === "agentMessage" && large.session.history[0]!.text.length).toBe(300_000);
+});
+test("用户消息迟到插入窗口首条模型回复之前，增量不会漏掉；旧页边界后的插入也包含", () => {
+  const windows = new HistoryWindows(), source = detail(1);
+  const first = windows.window(source);
+  source.session.history.unshift({ type: "userMessage", id: "late", text: "prompt", at: 0 });
+  const update = windows.window(source, { revision: first.historyPage!.revision });
+  expect(update.historySync.order).toEqual(["userMessage:late", "agentMessage:0"]);
+  expect(update.session.history.map(i => i.id)).toEqual(["late"]);
+  const long = detail(1600), initial = windows.window(long);
+  long.session.history.splice(1540, 0, { type: "userMessage", id: "late-boundary", text: "prompt", at: 0 });
+  const boundary = windows.window(long, { revision: initial.historyPage!.revision });
+  expect(boundary.session.history.map(i => i.id)).toEqual(["late-boundary"]);
+  expect(boundary.historySync.order[0]).toBe("userMessage:late-boundary");
 });

@@ -3,7 +3,7 @@ import { historyItemKey, type HistoryWindowResponse, type SessionDetailResponse 
 
 const PAGE_BYTES = 256 * 1024;
 const MAX_MANIFEST_ITEMS = 50_000;
-type Manifest = { id: string; epoch?: string; keys: string[]; hashes: Map<string, string> };
+type Manifest = { id: string; epoch?: string; keys: string[]; boundary: string | null; hashes: Map<string, string> };
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** 只保留有界的 ID/摘要清单，不复制聊天内容。失效版本安全回退最近一页。 */
@@ -18,7 +18,10 @@ export class HistoryWindows {
     let base = candidate?.id === detail.session.id && candidate.epoch === detail.serverEpoch ? candidate : undefined;
     // 先返回空历史、随后原终端首帧才到达时，也必须从最近一页开始。
     if (base && base.keys.length === 0 && history.length > 0) base = undefined;
-    let start = base ? base.keys.length ? keys.indexOf(base.keys[0]!) : 0 : history.length;
+    // 以前一页的末项作为边界，包含迟到插入首条模型回复之前的用户消息。
+    let start = base ? base.boundary === null ? 0 : keys.indexOf(base.boundary) + 1 : history.length;
+    if (base?.boundary && start === 0) base = undefined;
+    if (base && base.boundary === null && base.keys[0] && keys.indexOf(base.keys[0]) > limit) base = undefined;
     if (base && start < 0) base = undefined;
     const pageStart = (end: number) => {
       let begin = end, bytes = 0;
@@ -38,7 +41,7 @@ export class HistoryWindows {
     const previous = this.manifests.get(revision);
     if (previous) this.itemCount -= previous.keys.length;
     this.manifests.delete(revision);
-    this.manifests.set(revision, { id: detail.session.id, epoch: detail.serverEpoch, keys: order, hashes });
+    this.manifests.set(revision, { id: detail.session.id, epoch: detail.serverEpoch, keys: order, boundary: keys[start - 1] ?? null, hashes });
     this.itemCount += order.length;
     while (this.manifests.size > 128 || this.itemCount > MAX_MANIFEST_ITEMS) {
       const oldest = this.manifests.keys().next().value!;

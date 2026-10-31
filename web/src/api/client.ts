@@ -87,8 +87,9 @@ export class ApiClient {
   cachedSession(id: string) { return this.history.cached(id); }
   olderSession(id: string) { return this.history.load(id, true); }
   clearHistory() { this.history.clear(); }
-  resume(id: string) {
-    return this.request<SessionDetailResponse>(`/api/v1/sessions/${id}/resume`, { method: "POST" });
+  async resume(id: string) {
+    const wire = await this.request<HistoryWindowResponse>(`/api/v1/sessions/${id}/resume?history=window`, { method: "POST" });
+    return this.history.snapshot(wire);
   }
   sendMessage(id: string, text: string, clientMessageId?: string) {
     return this.request<{ ok: boolean; receipt?: MessageReceipt }>(`/api/v1/sessions/${id}/message`, {

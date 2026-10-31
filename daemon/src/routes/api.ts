@@ -140,7 +140,8 @@ export function createApiRouter(deps: ApiDeps): Hono {
     const id = c.req.param("id");
     if (isClaude(id)) unsupported();
     await deps.registry.resume(id);
-    return c.json(await deps.registry.detail(id));
+    const detail = await deps.registry.detail(id);
+    return c.json(c.req.query("history") === "window" ? historyWindows.window(detail) : detail);
   });
 
   api.post("/api/v1/sessions/:id/message", async (c) => {
