@@ -11,6 +11,8 @@ let sequence = 0;
 let outbox = [];
 let pumping = false;
 let acknowledged = 0;
+let lastExchangeAt = null;
+let connectionError = null;
 const executed = new Set();
 const remoteStops = new Set();
 const activeTools = new Map();
@@ -37,8 +39,15 @@ async function request($, path, body) {
   const r = await $.http.fetch(connection.url + path, { method: 'POST',
     headers: { Authorization: 'Bearer ' + connection.token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...identity, ...body }) });
-  if (!r.ok) throw new Error('AgentLink bridge HTTP ' + r.status);
-  return JSON.parse(r.text);
+  let value;
+  try { value = JSON.parse(r.text); } catch { value = null; }
+  if (!r.ok) {
+    const code = value?.error?.code;
+    if (code === 'PATH_NOT_ALLOWED') throw new Error('PATH_NOT_ALLOWED · 当前项目未加入后台 allowedRoots 白名单：' + identity.cwd + '；请添加该项目目录并重载 AgentLink 后台');
+    throw new Error('AgentLink bridge HTTP ' + r.status + (code ? ' · ' + code : ''));
+  }
+  if (!value) throw new Error('AgentLink 后台响应无效');
+  return value;
 }
 async function snapshot($) {
   try {
@@ -84,9 +93,13 @@ async function pump($) {
     if (!connection) connection = await loadConnection($);
     const reply = await request($, '/exchange', { status, turnId, inputBlocked, permissionMode, events: batch,
       nativeInteraction: nativeInteractions.size ? 'Claude 正在等待提问或计划确认，请在电脑终端处理' : null });
+    if (typeof reply.ack !== 'number') throw new Error('AgentLink 后台未返回注册确认');
+    lastExchangeAt = await $.clock.now(); connectionError = null;
     acknowledged = Math.max(acknowledged, reply.ack ?? 0);
     for (const command of reply.commands ?? []) await execute($, command);
-  } catch {
+  } catch (error) {
+    connectionError = String(error?.message ?? error);
+    if (connection?.token) connectionError = connectionError.split(connection.token).join('[已隐藏]');
     outbox = batch.concat(outbox);
     // daemon may have restarted on a new random loopback port.
     connection = await loadConnection($);
@@ -116,9 +129,14 @@ export function register(on) {
     await pump($);
     return next(e);
   });
-  on('command.run', { command: 'agentlink' }, async () => ({ text: identity
-    ? 'AgentLink · 原终端会话 ' + identity.sessionId + (connection ? ' · 已配置本机后台' : ' · 等待本机后台启动')
-    : 'AgentLink · 仅支持交互式终端' }));
+  on('command.run', { command: 'agentlink' }, async ($) => {
+    if (!identity) return { text: 'AgentLink · 仅支持交互式终端' };
+    await pump($);
+    const now = await $.clock.now();
+    const state = connectionError ? '未连接 · ' + connectionError : lastExchangeAt !== null && now - lastExchangeAt < 6000
+      ? '已连接本机后台 · 注册已确认' : '正在核对本机后台连接';
+    return { text: 'AgentLink · 原终端会话 ' + identity.sessionId + ' · 项目 ' + identity.cwd + ' · ' + state };
+  });
   on('prompt.submit', async ($, e, next) => {
     const result = await next(e);
     if (!result.drop) {

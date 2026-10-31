@@ -15,6 +15,7 @@ if (!parts || parts[0] * 1000000 + parts[1] * 10000 + parts[2] < 2010314) throw 
 for (const args of [
   ['plugin', 'validate', '--strict', join(root, 'claude-code')],
   ['plugin', 'install', 'agentlink', '--marketplace', root, '--scope', 'user'],
+  ['plugin', 'update', 'agentlink@agentlink-local'],
 ]) {
   const result = spawnSync(binary, args, { stdio: 'inherit', windowsHide: true });
   if (result.status !== 0) process.exit(result.status ?? 1);

@@ -15,6 +15,8 @@ node plugins/install.mjs
 
 已经打开的 Claude 会话中，输入 `/reload-plugins` 加载插件；`/agentlink` 查看原会话 ID。热加载到正在执行中的会话时，暂时显示状态待确认，后续真实轮次事件会更新状态。只有观察到当前 turn ID 后才开放停止按钮。
 
+`/agentlink` 只有收到后台注册确认后才显示“已连接本机后台”。若提示 `PATH_NOT_ALLOWED`，将命令显示的具体项目目录加入电脑 `~/.agentlink/config.toml` 的 `allowedRoots` 数组，保留已有目录，再安全重载后台；插件会自动重试，不需重开或 fork 原终端会话。不要将整个磁盘加入白名单。插件 0.2.0 的“已配置本机后台”只代表读取到了连接文件，不能作为注册成功依据；更新插件并 `/reload-plugins` 后可看到明确错误原因。
+
 手机 APK 需更新到 0.2.0；网页刷新至新版。当前实际验收环境为 Windows 原生交互终端。旧 WSL Claude 2.1.23 不支持本插件接口；跨 Windows/WSL 连接尚未验收。
 
 仅对某个终端试用而不安装：

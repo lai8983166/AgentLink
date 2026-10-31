@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing';
 
-function host(on, url = 'http://127.0.0.1:12345') {
+function host(on, url = 'http://127.0.0.1:12345', response) {
   const clock = mock.clock(on), packets = [], commands = [], submits = [];
   mock.env(on, { AGENTLINK_CLAUDE_BRIDGE_FILE: '/isolated/connection.json' });
   on('fs.read', () => ({ value: JSON.stringify({ protocol: 1, url, token: 'test-only-secret-32-characters-long' }) }));
@@ -11,6 +11,7 @@ function host(on, url = 'http://127.0.0.1:12345') {
   on('command.register', () => ({ value: { command: 'agentlink' } }));
   on('http.fetch', ($, e) => {
     const body = JSON.parse(e.init.body); packets.push({ path: e.url, ...body });
+    if (response) return { value: response(body) };
     const value = e.url.endsWith('/approval/wait') ? { state: 'decided', decision: 'allow' }
       : { ack: body.events?.at(-1)?.seq ?? 0, commands: commands.splice(0) };
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(value) } };
@@ -24,6 +25,25 @@ test('SDK and headless processes never register as controllable terminals', asyn
   await $.session.start({ ...START, surface: null, isInteractive: false });
   const result = await $.command.run({ command: 'agentlink', args: '' });
   expect(result.text).toContain('仅支持交互式终端');
+});
+test('connection command requires a successful registration, shows whitelist denial and recovery', async ($, on) => {
+  let rejected = true;
+  host(on, 'http://127.0.0.1:12345', body => rejected
+    ? { status: 409, ok: false, headers: {}, text: JSON.stringify({ error: { code: 'PATH_NOT_ALLOWED', message: 'not allowed' } }) }
+    : { status: 200, ok: true, headers: {}, text: JSON.stringify({ ack: body.events?.at(-1)?.seq ?? 0, commands: [] }) });
+  await $.session.start(START);
+  const denied = await $.command.run({ command: 'agentlink', args: '' });
+  expect(denied.text).toContain('PATH_NOT_ALLOWED'); expect(denied.text).toContain('allowedRoots');
+  expect(denied.text).not.toContain('注册已确认');
+  rejected = false;
+  const connected = await $.command.run({ command: 'agentlink', args: '' });
+  expect(connected.text).toContain('已连接本机后台 · 注册已确认');
+});
+test('missing registration acknowledgement is never reported as connected', async ($, on) => {
+  host(on, 'http://127.0.0.1:12345', () => ({ status: 200, ok: true, headers: {}, text: '{}' }));
+  await $.session.start(START);
+  const result = await $.command.run({ command: 'agentlink', args: '' });
+  expect(result.text).toContain('未返回注册确认'); expect(result.text).not.toContain('注册已确认');
 });
 test('connection file may only target numeric loopback, never a remote credential recipient', async ($, on) => {
   const { packets, clock } = host(on, 'https://example.com');

@@ -80,6 +80,19 @@ test("本机桥鉴权与协议检查；公网配对 token 不能直接连接插�
   expect((await app.request("/exchange", { method: "POST", headers: { Authorization: "Bearer bridge-only-secret", Origin: "https://untrusted.example" }, body: "{}" })).status).toBe(401);
   expect((await app.request("/exchange", { method: "POST", headers: { Authorization: "Bearer bridge-only-secret" }, body: "{}" })).status).toBe(400);
 });
+test("原终端项目不在白名单时明确拒绝注册，不生成空会话或消费事件；合法目录可重试", async () => {
+  const f = setup(), app = claudeRouter(f.service, "bridge-only-secret"), raw = randomUUID();
+  const packet = { ...f.packet, sessionId: raw, cwd: dirname(f.dir), events: [{ seq: 1, type: "connected", data: {} }] };
+  const send = () => app.request("/exchange", { method: "POST", headers: { Authorization: "Bearer bridge-only-secret", "Content-Type": "application/json" }, body: JSON.stringify(packet) });
+  const denied = await send();
+  expect(denied.status).toBe(409);
+  expect(await denied.json()).toMatchObject({ error: { code: "PATH_NOT_ALLOWED" } });
+  expect(f.service.list().some(s => s.id === "claude:" + raw)).toBe(false);
+  packet.cwd = f.dir;
+  const connected = await send();
+  expect(connected.status).toBe(200); expect(await connected.json()).toMatchObject({ ack: 1 });
+  expect(f.service.detail("claude:" + raw).session.terminal?.connected).toBe(true);
+});
 test("审批仅一次，恢复快照包含审批；电脑处理后旧按钮不可用", async () => {
   const f = setup();
   f.exchange("approval", { approvalId: "a", name: "Bash", input: { command: "echo test" } });
