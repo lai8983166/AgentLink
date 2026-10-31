@@ -152,12 +152,17 @@ export class CodexBridge {
     return id;
   }
 
-  async threadList(): Promise<CodexThreadInfo[]> {
-    const res = await this.rpc.call<CodexThreadListResult>(CodexMethod.threadList, {
-      cursor: null,
-      limit: 100,
-    });
-    return res?.data ?? [];
+  async threadList(all = false): Promise<CodexThreadInfo[]> {
+    const rows = new Map<string, CodexThreadInfo>(), cursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const res: CodexThreadListResult = await this.rpc.call(CodexMethod.threadList, { cursor, limit: 100 });
+      for (const row of res?.data ?? []) rows.set(row.id, row);
+      cursor = res?.nextCursor ?? null;
+      if (cursor && cursors.has(cursor)) throw new DaemonError("INTERNAL", "Codex 会话分页游标未前进，请刷新重试");
+      if (cursor) cursors.add(cursor);
+    } while (all && cursor);
+    return [...rows.values()];
   }
 
   /** fork 既有会话（含 busy 会话）为归本方管理的新会话（兜底接力） */

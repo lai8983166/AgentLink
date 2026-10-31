@@ -28,6 +28,8 @@ import { createNativePushRouter } from "./routes/native-push";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { ClaudeSessions } from "./claude/sessions";
+import { ClaudeCatalog } from "./claude/catalog";
+import { homedir } from "node:os";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
 
@@ -60,6 +62,8 @@ export function createApp(opts: {
   ntfy?: NtfyConfig;
   /** 测试传输注入，禁止自动化向真实手机或外部推送服务发消息。 */
   pushSender?: PushSender;
+  /** 测试显式注入隔离历史目录；auditPath 测试默认禁用本机历史扫描。 */
+  claudeProjectsDir?: string | false;
   /** 轮换后持久化回调（写配置文件） */
   onTokenRotate?: (newToken: string) => void;
 }): DaemonApp {
@@ -71,6 +75,7 @@ export function createApp(opts: {
   // 不改历史内容、事件序号或写操作，也不拦截 WebSocket/APK 下载。
   const compressDetail = compress({ contentTypeFilter: /^application\/json\b/ });
   app.use("/api/v1/sessions/:id", (c, next) => c.req.method === "GET" ? compressDetail(c, next) : next());
+  app.use("/api/v1/sessions", (c, next) => c.req.method === "GET" ? compressDetail(c, next) : next());
 
   // 健康检查：无需认证
   app.get(API.health, (c) => c.json({ ok: true, daemon: "agentlink", version: DAEMON_VERSION }));
@@ -83,6 +88,7 @@ export function createApp(opts: {
   const controls = new ControlStore(opts.auditPath ? `${opts.auditPath}.controls` : join(configDir(), "controls.db"));
   const registry = new SessionRegistry(opts.bridge, bus, approvals, fs, controls, opts.assertNoWriter, opts.resumeSettings);
   const claude = new ClaudeSessions(opts.auditPath ? `${opts.auditPath}.claude` : join(configDir(), "claude.db"), bus, fs, audit);
+  const claudeCatalog = new ClaudeCatalog(opts.claudeProjectsDir ?? (opts.auditPath ? false : join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects")), id => ({ latestSeq: bus.latestSeq(id), serverEpoch: bus.epoch }));
   const push = new WebPushService(new PushStore(opts.auditPath ? `${opts.auditPath}.push` : join(configDir(), "push.db")), opts.pushSender);
   bus.tap((e) => push.onEvent(e));
 
@@ -112,7 +118,7 @@ export function createApp(opts: {
   // REST
   app.route(
     "/",
-    createApiRouter({ token: opts.token, registry, claude, approvals, audit, fs, auth, desktop, limits, limitsRefresh,
+    createApiRouter({ token: opts.token, registry, claude, claudeCatalog, approvals, audit, fs, auth, desktop, limits, limitsRefresh,
       connectionHealth: () => ({ appServer: opts.bridge.ready ? "ready" : "disconnected", desktop: desktop?.connectionHealth().state ?? "disabled", lastDesktopSyncAt: desktop?.connectionHealth().lastSyncAt ?? null }) }),
   );
 

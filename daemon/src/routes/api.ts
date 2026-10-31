@@ -16,6 +16,7 @@ import { DAEMON_VERSION } from "../server-version";
 import type { RateLimit } from "@agentlink/shared";
 import type { ClaudeSessions } from "../claude/sessions";
 import { HistoryWindows } from "../domain/history-window";
+import type { ClaudeCatalog } from "../claude/catalog";
 
 /** REST API（任务 5.1）：Bearer 认证 + 错误 envelope */
 
@@ -25,6 +26,7 @@ export interface ApiDeps {
   auth?: { token: string };
   registry: SessionRegistry;
   claude?: ClaudeSessions;
+  claudeCatalog?: ClaudeCatalog;
   approvals: ApprovalService;
   audit: AuditStore;
   fs: FsService;
@@ -106,10 +108,19 @@ export function createApiRouter(deps: ApiDeps): Hono {
   };
   const unsupported = () => { throw new DaemonError("VALIDATION_ERROR", "Claude 使用原终端连接；此操作不支持恢复、fork 或改变终端权限模式"); };
   api.get(API.sessions, async (c) => {
-    const local = deps.claude?.list() ?? [];
-    const codex = await deps.registry.list().catch(e => { if (!local.length) throw e; return []; });
+    const agent = c.req.query("agent"), scope = c.req.query("scope");
+    if (agent && agent !== "codex" && agent !== "claude") return c.json(errorBody("VALIDATION_ERROR", "会话类型无效"), 400);
+    const warnings: string[] = [];
+    const local = agent === "codex" ? [] : deps.claude?.list() ?? [];
+    const native = agent === "codex" ? [] : await deps.claudeCatalog?.list().catch(() => { warnings.push("本机 Claude 历史读取失败，可刷新重试"); return []; }) ?? [];
+    const claude = new Map(native.map(s => [s.id, s]));
+    for (const item of local) {
+      const historical = claude.get(item.id);
+      claude.set(item.id, { ...item, title: historical?.title || item.title, preview: item.preview || historical?.preview || "", lastActivityAt: Math.max(item.lastActivityAt, historical?.lastActivityAt ?? 0) });
+    }
+    const codex = agent === "claude" ? [] : await deps.registry.list(scope === "all").catch(e => { if (!claude.size) throw e; warnings.push("Codex 列表读取失败，可刷新重试"); return []; });
     c.header("Cache-Control", "no-store");
-    return c.json({ sessions: [...codex, ...local] });
+    return c.json({ sessions: [...codex, ...claude.values()], ...(warnings.length ? { warnings } : {}) });
   });
   api.get("/api/v1/admin/restart-readiness", (c) => c.json(readiness()));
   api.post("/api/v1/admin/prepare-restart", (c) => {
@@ -129,7 +140,7 @@ export function createApiRouter(deps: ApiDeps): Hono {
   api.get("/api/v1/sessions/:id", async (c) => {
     const id = c.req.param("id");
     c.header("Cache-Control", "no-store");
-    const detail = isClaude(id) ? deps.claude!.detail(id) : await deps.registry.detail(id);
+    const detail = isClaude(id) ? deps.claude!.has(id) ? deps.claude!.detail(id) : await deps.claudeCatalog!.detail(id) : await deps.registry.detail(id);
     if (c.req.query("history") !== "window") return c.json(detail);
     const revision = c.req.query("revision"), before = c.req.query("before");
     if ((revision?.length ?? 0) > 128 || (before?.length ?? 0) > 4096) return c.json(errorBody("VALIDATION_ERROR", "历史游标无效"), 400);

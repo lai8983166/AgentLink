@@ -50,6 +50,7 @@ export type StatusResponse = z.infer<typeof StatusResponse>;
 
 export const SessionListResponse = z.object({
   sessions: z.array(SessionSummary),
+  warnings: z.array(z.string()).optional(),
 });
 export type SessionListResponse = z.infer<typeof SessionListResponse>;
 

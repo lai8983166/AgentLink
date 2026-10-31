@@ -224,6 +224,16 @@ describe("映射器 mapServerRequest（审批）", () => {
 /* ============ 3.4 桥接层：审批挂起 → 决定回包 ============ */
 
 describe("CodexBridge", () => {
+  test("全部目录遍历后续页并去重，不调用恢复；重复游标不能无限循环", async () => {
+    const fake = new FakeCodexServer(), bridge = new CodexBridge(fake);
+    fake.threadListResponse = params => params.cursor ? { data: [{ id: "first" }, { id: "older" }], nextCursor: null } : { data: [{ id: "first" }], nextCursor: "next" };
+    await bridge.start();
+    expect((await bridge.threadList(true)).map(s => s.id)).toEqual(["first", "older"]);
+    expect(fake.written.map(s => JSON.parse(s).method)).not.toContain("thread/resume");
+    fake.threadListResponse = () => ({ data: [], nextCursor: "stuck" });
+    await expect(bridge.threadList(true)).rejects.toThrow("游标未前进");
+    bridge.stop();
+  });
   test("审批：请求 → 事实流出 → respondApproval 回包", async () => {
     const fake = new FakeCodexServer();
     const bridge = new CodexBridge(fake);

@@ -30,7 +30,7 @@ afterEach(() => {
   }
 });
 
-async function setup() {
+async function setup(claudeProjectsDir?: string) {
   const fake = new FakeCodexServer();
   const bridge = new CodexBridge(fake);
   await bridge.start();
@@ -41,6 +41,7 @@ async function setup() {
     webDist,
     auditPath: join(tmpRoot, "audit.db"),
     desktop: false,
+    claudeProjectsDir,
   });
   await registry.start();
   const authed = { Authorization: `Bearer ${TOKEN}` } as Record<string, string>;
@@ -99,6 +100,20 @@ describe("REST API", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { sessions: Array<{ id: string; status: string }> };
     expect(body.sessions.some((s) => s.id === "old1" && s.status === "unknown")).toBe(true);
+  });
+  test("全部 Claude 目录包含未加载插件的本机历史，只读详情不恢复；代理过滤严格", async () => {
+    const projects = join(tmpRoot, "claude-projects"), project = join(projects, "isolated"); mkdirSync(project, { recursive: true });
+    const raw = crypto.randomUUID();
+    writeFileSync(join(project, raw + ".jsonl"), JSON.stringify({ type: "user", sessionId: raw, cwd: tmpRoot, timestamp: "2026-01-01T00:00:00Z", uuid: "history-user", message: { content: "隔离历史测试" } }) + "\n");
+    const { app, authed, fake } = await setup(projects);
+    const list = await app.request("/api/v1/sessions?agent=claude&scope=all", { headers: authed });
+    expect((await list.json()).sessions).toMatchObject([{ id: "claude:" + raw, agent: "claude", terminal: { connected: false } }]);
+    const detail = await app.request("/api/v1/sessions/claude:" + raw + "?history=window", { headers: authed });
+    expect((await detail.json()).session).toMatchObject({ controlMode: "observe", history: [{ type: "userMessage", text: "隔离历史测试" }] });
+    const codex = await app.request("/api/v1/sessions?agent=codex&scope=all", { headers: authed });
+    expect((await codex.json()).sessions.every((s: { agent: string }) => s.agent === "codex")).toBe(true);
+    const invalid = await app.request("/api/v1/sessions?agent=unexpected", { headers: authed }); expect(invalid.status).toBe(400);
+    expect(fake.written.map(s => JSON.parse(s).method)).not.toContain("thread/resume");
   });
 
   test("创建会话：合法路径 201；白名单外 409 PATH_NOT_ALLOWED", async () => {

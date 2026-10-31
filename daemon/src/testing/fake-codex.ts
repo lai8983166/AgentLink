@@ -5,6 +5,7 @@ export class FakeCodexServer implements CodexTransportFactory {
   written: string[] = [];
   resumeError: string | null = null;
   rateLimitsResponse: unknown = null;
+  threadListResponse?: (params: Record<string, unknown>) => unknown;
   onTurnStart?: (params: Record<string, unknown>) => void;
   private onData: ((c: string) => void) | null = null;
 
@@ -68,6 +69,7 @@ export class FakeCodexServer implements CodexTransportFactory {
           ],
         },
       };
+      if (msg.method === "thread/list" && this.threadListResponse) results["thread/list"] = this.threadListResponse(msg.params ?? {});
       const result = results[msg.method] ?? {};
       const err =
         msg.method === "thread/resume" && (msg.params?.threadId === "busy" || this.resumeError)

@@ -158,9 +158,10 @@ export class SessionRegistry {
   /* ============ 列表 ============ */
 
   /** 全量列表：实时会话 + rollout 既有会话（live 优先） */
-  async list(): Promise<SessionSummary[]> {
-    await this.refreshRollouts();
-    await this.desktop?.syncSummaries?.([...this.rolloutIndex.values()].filter((s) => s.desktopManaged && !this.live.has(s.id)).map((s) => s.id));
+  async list(all = false): Promise<SessionSummary[]> {
+    await this.refreshRollouts(all);
+    // 全部历史入口不逐条探测已关闭原会话，避免大量无用 IPC。
+    if (!all) await this.desktop?.syncSummaries?.([...this.rolloutIndex.values()].filter((s) => s.desktopManaged && !this.live.has(s.id) && s.lastActivityAt >= Date.now() - 30 * 86400_000).map((s) => s.id));
     const out = new Map<string, SessionSummary>();
     for (const [id, s] of this.rolloutIndex) {
       out.set(id, this.mergeDesktopOverlay(id) ?? s);
@@ -185,11 +186,12 @@ export class SessionRegistry {
     );
   }
 
-  private async refreshRollouts(): Promise<void> {
+  private async refreshRollouts(allThreads = false): Promise<void> {
     let threads: CodexThreadInfo[] = [];
     try {
-      threads = await this.bridge.threadList();
-    } catch {
+      threads = await this.bridge.threadList(allThreads);
+    } catch (e) {
+      if (allThreads) throw e;
       return; // codex 未就绪时静默，等重启钩子再试
     }
     for (const t of threads) {

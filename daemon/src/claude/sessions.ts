@@ -44,6 +44,7 @@ export class ClaudeSessions {
     this.timer.unref?.();
   }
   owns(id: string): boolean { return id.startsWith(CLAUDE_PREFIX); }
+  has(id: string): boolean { return this.states.has(id); }
   private get(id: string): State {
     const s = this.states.get(id);
     if (!s) throw new DaemonError("SESSION_NOT_FOUND", "未找到 Claude 终端会话");
