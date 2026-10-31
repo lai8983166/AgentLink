@@ -58,8 +58,23 @@ export const SessionDetailResponse = z.object({
   /** 服务端当前保留的最新事件序号（快照重建基准） */
   latestSeq: z.number().int(),
   serverEpoch: z.string().optional(),
+  /** 当前已加载历史窗口；缺失表示兼容旧版完整详情。 */
+  historyPage: z.object({
+    revision: z.string(), hasMore: z.boolean(), total: z.number().int(),
+    oldest: z.string().nullable(), cached: z.boolean().optional(),
+  }).optional(),
 });
 export type SessionDetailResponse = z.infer<typeof SessionDetailResponse>;
+
+/** history=window 的线传响应；patch 中 history 只含变化项，order 是完整窗口顺序。 */
+export const HistoryWindowResponse = SessionDetailResponse.extend({
+  historySync: z.object({
+    mode: z.enum(["replace", "patch"]), baseRevision: z.string().optional(),
+    order: z.array(z.string()),
+  }),
+});
+export type HistoryWindowResponse = z.infer<typeof HistoryWindowResponse>;
+export const historyItemKey = (item: { type: string; id: string }) => item.type + ":" + item.id;
 
 export const CreateSessionResponse = z.object({
   id: z.string(),

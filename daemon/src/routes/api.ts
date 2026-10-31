@@ -15,6 +15,7 @@ import type { FsService } from "../domain/fs";
 import { DAEMON_VERSION } from "../server-version";
 import type { RateLimit } from "@agentlink/shared";
 import type { ClaudeSessions } from "../claude/sessions";
+import { HistoryWindows } from "../domain/history-window";
 
 /** REST API（任务 5.1）：Bearer 认证 + 错误 envelope */
 
@@ -98,6 +99,7 @@ export function createApiRouter(deps: ApiDeps): Hono {
   });
 
   const isClaude = (id: string) => deps.claude?.owns(id) ?? false;
+  const historyWindows = new HistoryWindows();
   const readiness = () => {
     const codex = deps.registry.restartReadiness(), claude = deps.claude?.restartReadiness();
     return { ...codex, safe: codex.safe && (claude?.safe ?? true), activeSessionIds: [...codex.activeSessionIds, ...(claude?.activeSessionIds ?? [])] };
@@ -127,7 +129,11 @@ export function createApiRouter(deps: ApiDeps): Hono {
   api.get("/api/v1/sessions/:id", async (c) => {
     const id = c.req.param("id");
     c.header("Cache-Control", "no-store");
-    return c.json(isClaude(id) ? deps.claude!.detail(id) : await deps.registry.detail(id));
+    const detail = isClaude(id) ? deps.claude!.detail(id) : await deps.registry.detail(id);
+    if (c.req.query("history") !== "window") return c.json(detail);
+    const revision = c.req.query("revision"), before = c.req.query("before");
+    if ((revision?.length ?? 0) > 128 || (before?.length ?? 0) > 4096) return c.json(errorBody("VALIDATION_ERROR", "历史游标无效"), 400);
+    return c.json(historyWindows.window(detail, { revision, before }));
   });
 
   api.post("/api/v1/sessions/:id/resume", async (c) => {
