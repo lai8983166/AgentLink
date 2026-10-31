@@ -1,5 +1,7 @@
 // @agentlink/daemon 入口：装配并启动
-import { loadConfig, saveConfig, configPath } from "./config";
+import { loadConfig, saveConfig, configPath, configDir } from "./config";
+import { join } from "node:path";
+import { startClaudeTransport } from "./claude/transport";
 import { createApp, websocket } from "./server";
 import { CodexBridge } from "./codex/bridge";
 import { createRealTransportFactory } from "./codex/process";
@@ -10,7 +12,7 @@ async function main() {
   keepAlive(cfg.keepAlive);
 
   const bridge = new CodexBridge(createRealTransportFactory());
-  const { app, registry, limitsRefresh, push } = createApp({
+  const { app, registry, claude, limitsRefresh, push } = createApp({
     token: cfg.token,
     allowedRoots: cfg.allowedRoots,
     bridge,
@@ -22,6 +24,7 @@ async function main() {
   });
 
   Bun.serve({ port: cfg.port, fetch: app.fetch, websocket });
+  startClaudeTransport(claude, join(configDir(), "claude-bridge.json"));
 
   console.log(`agentlink daemon → http://0.0.0.0:${cfg.port}`);
   console.log(`  health  → /api/v1/health`);

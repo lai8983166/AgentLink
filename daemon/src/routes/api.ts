@@ -14,6 +14,7 @@ import type { AuditStore } from "../domain/audit";
 import type { FsService } from "../domain/fs";
 import { DAEMON_VERSION } from "../server-version";
 import type { RateLimit } from "@agentlink/shared";
+import type { ClaudeSessions } from "../claude/sessions";
 
 /** REST API（任务 5.1）：Bearer 认证 + 错误 envelope */
 
@@ -22,6 +23,7 @@ export interface ApiDeps {
   /** 可变 token 持有者：轮换后立即生效 */
   auth?: { token: string };
   registry: SessionRegistry;
+  claude?: ClaudeSessions;
   approvals: ApprovalService;
   audit: AuditStore;
   fs: FsService;
@@ -95,13 +97,25 @@ export function createApiRouter(deps: ApiDeps): Hono {
     });
   });
 
-  api.get(API.sessions, async (c) => c.json({ sessions: await deps.registry.list() }));
-  api.get("/api/v1/admin/restart-readiness", (c) => c.json(deps.registry.restartReadiness()));
-  api.post("/api/v1/admin/prepare-restart", (c) => {
-    const readiness = deps.registry.prepareRestart();
-    return c.json(readiness, readiness.safe ? 200 : 409);
+  const isClaude = (id: string) => deps.claude?.owns(id) ?? false;
+  const readiness = () => {
+    const codex = deps.registry.restartReadiness(), claude = deps.claude?.restartReadiness();
+    return { ...codex, safe: codex.safe && (claude?.safe ?? true), activeSessionIds: [...codex.activeSessionIds, ...(claude?.activeSessionIds ?? [])] };
+  };
+  const unsupported = () => { throw new DaemonError("VALIDATION_ERROR", "Claude 使用原终端连接；此操作不支持恢复、fork 或改变终端权限模式"); };
+  api.get(API.sessions, async (c) => {
+    const local = deps.claude?.list() ?? [];
+    const codex = await deps.registry.list().catch(e => { if (!local.length) throw e; return []; });
+    c.header("Cache-Control", "no-store");
+    return c.json({ sessions: [...codex, ...local] });
   });
-  api.post("/api/v1/admin/cancel-restart", (c) => { deps.registry.cancelRestart(); return c.json({ ok: true }); });
+  api.get("/api/v1/admin/restart-readiness", (c) => c.json(readiness()));
+  api.post("/api/v1/admin/prepare-restart", (c) => {
+    const r = readiness();
+    if (r.safe) { deps.registry.prepareRestart(); deps.claude?.setDraining(true); }
+    return c.json(r, r.safe ? 200 : 409);
+  });
+  api.post("/api/v1/admin/cancel-restart", (c) => { deps.registry.cancelRestart(); deps.claude?.setDraining(false); return c.json({ ok: true }); });
 
   api.post(API.sessions, async (c) => {
     const body = CreateSessionRequest.safeParse(await c.req.json().catch(() => null));
@@ -111,11 +125,14 @@ export function createApiRouter(deps: ApiDeps): Hono {
   });
 
   api.get("/api/v1/sessions/:id", async (c) => {
-    return c.json(await deps.registry.detail(c.req.param("id")));
+    const id = c.req.param("id");
+    c.header("Cache-Control", "no-store");
+    return c.json(isClaude(id) ? deps.claude!.detail(id) : await deps.registry.detail(id));
   });
 
   api.post("/api/v1/sessions/:id/resume", async (c) => {
     const id = c.req.param("id");
+    if (isClaude(id)) unsupported();
     await deps.registry.resume(id);
     return c.json(await deps.registry.detail(id));
   });
@@ -123,39 +140,47 @@ export function createApiRouter(deps: ApiDeps): Hono {
   api.post("/api/v1/sessions/:id/message", async (c) => {
     const body = SendMessageRequest.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(errorBody("VALIDATION_ERROR", "请求体不合法"), 400);
-    const receipt = await deps.registry.sendMessage(c.req.param("id"), body.data.text, body.data.clientMessageId);
+    const id = c.req.param("id");
+    const receipt = isClaude(id) ? deps.claude!.sendMessage(id, body.data.text, body.data.clientMessageId)
+      : await deps.registry.sendMessage(id, body.data.text, body.data.clientMessageId);
     return c.json({ ok: true, receipt });
   });
 
   api.get("/api/v1/sessions/:id/messages/:messageId", (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json({ receipt: deps.registry.messageReceipt(c.req.param("id"), c.req.param("messageId")) });
+    const id = c.req.param("id");
+    return c.json({ receipt: isClaude(id) ? deps.claude!.messageReceipt(id, c.req.param("messageId")) : deps.registry.messageReceipt(id, c.req.param("messageId")) });
   });
 
   api.post("/api/v1/sessions/:id/interrupt", async (c) => {
-    await deps.registry.interrupt(c.req.param("id"));
+    const id = c.req.param("id");
+    if (isClaude(id)) await deps.claude!.interrupt(id); else await deps.registry.interrupt(id);
     return c.json({ ok: true });
   });
 
   // 桌面会话：观察 / 接管 / 停止观察（任务 3.2）
   api.post("/api/v1/sessions/:id/observe", async (c) => {
+    if (isClaude(c.req.param("id"))) unsupported();
     const mode = (await c.req.json().catch(() => ({}))) as { mode?: string };
     await deps.registry.observe(c.req.param("id"), mode.mode === "takeover" ? "takeover" : "observe");
     return c.json({ ok: true, mode: mode.mode === "takeover" ? "takeover" : "observe" });
   });
 
   api.post("/api/v1/sessions/:id/takeover", async (c) => {
+    if (isClaude(c.req.param("id"))) unsupported();
     await deps.registry.takeover(c.req.param("id"));
     return c.json({ ok: true, mode: "takeover" });
   });
 
   api.post("/api/v1/sessions/:id/unobserve", (c) => {
+    if (isClaude(c.req.param("id"))) return c.json({ ok: true });
     deps.desktop?.stop(c.req.param("id"));
     return c.json({ ok: true });
   });
 
   // 兜底接力（任务 3.2）：fork 出归本方管理的新会话
   api.post("/api/v1/sessions/:id/fork", async (c) => {
+    if (isClaude(c.req.param("id"))) unsupported();
     const body = (await c.req.json().catch(() => ({}))) as { approvalPolicy?: string };
     const id = await deps.registry.fork(
       c.req.param("id"),
@@ -165,6 +190,7 @@ export function createApiRouter(deps: ApiDeps): Hono {
   });
 
   api.patch("/api/v1/sessions/:id", async (c) => {
+    if (isClaude(c.req.param("id"))) unsupported();
     const body = PatchSessionRequest.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(errorBody("VALIDATION_ERROR", "请求体不合法"), 400);
     deps.registry.setPolicy(c.req.param("id"), body.data.approvalPolicy);
@@ -175,6 +201,7 @@ export function createApiRouter(deps: ApiDeps): Hono {
     const body = ApprovalDecisionRequest.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(errorBody("VALIDATION_ERROR", "请求体不合法"), 400);
     const id = c.req.param("id");
+    if (isClaude(id)) { deps.claude!.decide(id, c.req.param("aid"), body.data.decision); return c.json({ ok: true }); }
     const { session } = await deps.registry.detail(id).catch(() => ({ session: null }));
     await deps.approvals.submit(id, c.req.param("aid"), body.data.decision, session?.cwd ?? session?.title ?? id);
     return c.json({ ok: true });

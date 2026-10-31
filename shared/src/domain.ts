@@ -25,11 +25,11 @@ export const ApprovalDecision = z.enum([
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 
 /** 工具调用种类（工具卡片） */
-export const ToolKind = z.enum(["exec", "fileChange"]);
+export const ToolKind = z.enum(["exec", "fileChange", "tool"]);
 export type ToolKind = z.infer<typeof ToolKind>;
 
 /** 审批请求种类 */
-export const ApprovalKind = z.enum(["command", "fileChange"]);
+export const ApprovalKind = z.enum(["command", "fileChange", "tool"]);
 export type ApprovalKind = z.infer<typeof ApprovalKind>;
 
 /** diff 统计 */
@@ -75,7 +75,16 @@ export const SessionSummary = z.object({
   id: z.string(),
   title: z.string(),
   cwd: z.string(),
-  agent: z.literal("codex"),
+  agent: z.enum(["codex", "claude"]),
+  /** Claude 原终端连接；与 Codex 的桌面所有权分开。 */
+  terminal: z.object({
+    connected: z.boolean(),
+    inputBlocked: z.boolean(),
+    canInterrupt: z.boolean(),
+    reason: z.string().nullable(),
+    permissionMode: z.string().nullable(),
+    originalSessionId: z.string(),
+  }).optional(),
   status: SessionStatus,
   /** 权威状态的更新时间；用于防止旧列表响应覆盖较新的实时推送。 */
   statusUpdatedAt: z.number().optional(),
@@ -112,7 +121,7 @@ export type PendingApprovalSnapshot = z.infer<typeof PendingApprovalSnapshot>;
 
 export const MessageReceipt = z.object({
   clientMessageId: z.string(),
-  state: z.enum(["sending", "accepted", "failed", "uncertain"]),
+  state: z.enum(["sending", "queued", "accepted", "failed", "uncertain"]),
   updatedAt: z.number(),
   error: z.string().nullable(),
 });

@@ -313,7 +313,8 @@ export class DesktopSessionManager {
   }
 
   /** 审批决定委托（任务 4.2） */
-  async decide(conversationId: string, requestId: string, decision: string, kind: "command" | "fileChange" = "command"): Promise<void> {
+  async decide(conversationId: string, requestId: string, decision: string, kind: "command" | "fileChange" | "tool" = "command"): Promise<void> {
+    if (kind === "tool") throw new Error("IPC_UNSUPPORTED_APPROVAL: Claude 工具审批不能发往 Codex");
     const f = this.sessions.get(conversationId);
     if (!f) throw new Error("IPC_NOT_TAKEN_OVER: 会话未接管");
     await f.decideApproval(requestId, decision, kind);

@@ -8,3 +8,4 @@ export * from "./rest";
 export * from "./ws";
 export * from "./push";
 export * from "./native-push";
+export * from "./claude";

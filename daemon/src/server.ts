@@ -26,6 +26,7 @@ import { WebPushService, type PushSender } from "./notify/web-push";
 import { createPushRouter } from "./routes/push";
 import { createNativePushRouter } from "./routes/native-push";
 import { cors } from "hono/cors";
+import { ClaudeSessions } from "./claude/sessions";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
 
@@ -41,6 +42,7 @@ export interface DaemonApp {
   limitsRefresh: LimitsRefresh;
   push: WebPushService;
   desktop?: DesktopSessionManager;
+  claude: ClaudeSessions;
 }
 
 export function createApp(opts: {
@@ -75,6 +77,7 @@ export function createApp(opts: {
   const fs = new FsService(opts.allowedRoots);
   const controls = new ControlStore(opts.auditPath ? `${opts.auditPath}.controls` : join(configDir(), "controls.db"));
   const registry = new SessionRegistry(opts.bridge, bus, approvals, fs, controls, opts.assertNoWriter, opts.resumeSettings);
+  const claude = new ClaudeSessions(opts.auditPath ? `${opts.auditPath}.claude` : join(configDir(), "claude.db"), bus, fs, audit);
   const push = new WebPushService(new PushStore(opts.auditPath ? `${opts.auditPath}.push` : join(configDir(), "push.db")), opts.pushSender);
   bus.tap((e) => push.onEvent(e));
 
@@ -104,7 +107,7 @@ export function createApp(opts: {
   // REST
   app.route(
     "/",
-    createApiRouter({ token: opts.token, registry, approvals, audit, fs, auth, desktop, limits, limitsRefresh,
+    createApiRouter({ token: opts.token, registry, claude, approvals, audit, fs, auth, desktop, limits, limitsRefresh,
       connectionHealth: () => ({ appServer: opts.bridge.ready ? "ready" : "disconnected", desktop: desktop?.connectionHealth().state ?? "disabled", lastDesktopSyncAt: desktop?.connectionHealth().lastSyncAt ?? null }) }),
   );
 
@@ -183,7 +186,7 @@ export function createApp(opts: {
     });
   }
 
-  return { app, registry, approvals, audit, controls, desktop, bridge: opts.bridge, auth, limitsRefresh, push };
+  return { app, registry, claude, approvals, audit, controls, desktop, bridge: opts.bridge, auth, limitsRefresh, push };
 }
 
 /** serveStatic 的 root 相对于进程 CWD，这里换成相对 import 路径的 posix 形式 */
