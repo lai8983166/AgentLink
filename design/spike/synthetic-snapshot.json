@@ -1,0 +1,48 @@
+{
+  "_note": "人工构造的协议结构示例；不包含真实会话、项目代码或命令输出。",
+  "top": {
+    "id": "example-thread",
+    "title": "示例任务",
+    "latestThreadSettings": {
+      "cwd": "C:/projects/example-app",
+      "approvalPolicy": "never"
+    },
+    "requestsSample": []
+  },
+  "lastTurnKeys": {
+    "total": 1,
+    "first": "example-turn",
+    "last": "example-turn"
+  },
+  "sampleAgentItem": {
+    "type": "agentMessage",
+    "id": "example-agent",
+    "text": "示例修改已完成。",
+    "phase": "final",
+    "memoryCitation": null,
+    "delivery": null,
+    "questions": null
+  },
+  "sampleFileChangeItem": {
+    "type": "fileChange",
+    "id": "example-change",
+    "changes": [
+      {
+        "path": "C:/projects/example-app/src/example.ts",
+        "kind": "update",
+        "diff": "--- a/src/example.ts\n+++ b/src/example.ts\n@@ -1 +1 @@\n-export const value = 1;\n+export const value = 2;\n"
+      }
+    ],
+    "status": "completed"
+  },
+  "sampleCommandItem": {
+    "type": "commandExecution",
+    "id": "example-command",
+    "command": "node --version",
+    "cwd": "C:/projects/example-app",
+    "status": "completed",
+    "aggregatedOutput": "v22.0.0\n",
+    "exitCode": 0,
+    "durationMs": 10
+  }
+}

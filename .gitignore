@@ -1,5 +1,15 @@
 # 本地配置（每人不同，不入库）
 .claude/settings.local.json
+.agentlink/
+.env
+.env.*
+!.env.example
+!.env.template
+
+# 原始会话快照与本机探针输出仅留在本机；协议样例必须人工构造。
+design/spike/real-snapshot*.json
+design/spike/scratch/*
+!design/spike/scratch/e2e-ok.txt
 
 # Node（daemon / PWA 将来使用）
 node_modules/

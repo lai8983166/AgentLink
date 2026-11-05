@@ -1,5 +1,7 @@
 // 端到端演练（任务 8.1/8.2 自动化部分）：真 daemon + 真 codex
 // 流程：建会话(untrusted) → WS 收流式/工具事件 → 审批请求 → accept → 完成 → 审计核对
+import { fileURLToPath } from "node:url";
+const scratch = fileURLToPath(new URL("./scratch/", import.meta.url));
 const BASE = "http://127.0.0.1:8799";
 const TOKEN = process.argv[2];
 if (!TOKEN) {
@@ -17,7 +19,7 @@ async function main() {
     method: "POST",
     headers: auth,
     body: JSON.stringify({
-      projectPath: "C:/projects/AgentLink/design/spike/scratch",
+      projectPath: scratch,
       approvalPolicy: "untrusted",
       prompt: "Create a file named e2e-ok.txt containing exactly the word hello. Then reply with just: DONE",
     }),
@@ -77,7 +79,7 @@ async function main() {
   const audit = await (await fetch(`${BASE}/api/v1/audit`, { headers: auth })).json();
   const last = audit.entries[0];
   log("✓ 审计最新:", last?.decision, (last?.command ?? "").slice(0, 40));
-  const file = Bun.file("C:/projects/AgentLink/design/spike/scratch/e2e-ok.txt");
+  const file = Bun.file(new URL("./scratch/e2e-ok.txt", import.meta.url));
   const fileOk = await file.exists();
   log(fileOk ? `✓ 文件已创建，内容: ${await file.text()}` : "✗ 文件未找到");
   const counts = {};

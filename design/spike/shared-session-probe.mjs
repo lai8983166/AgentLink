@@ -2,6 +2,7 @@
 // Only creates and controls its own test thread. Never forks or resumes user threads.
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 const endpoint=`ws://127.0.0.1:${process.argv[3]??14880}`;
 const proc = spawn(process.argv[2], ['app-server', '--listen', endpoint], {stdio:['ignore','pipe','pipe']});
 proc.on('exit',(code)=>console.log('SERVER_EXIT',code));
@@ -29,7 +30,7 @@ async function connect(label) {
 try {
   await delay(2000);
   const a=await connect('desktop_simulated'), b=await connect('phone_simulated');
-  const t=await a.call('thread/start',{cwd:'C:/projects/AgentLink/design/spike/scratch',approvalPolicy:'untrusted',sandbox:'read-only'});
+  const t=await a.call('thread/start',{cwd:fileURLToPath(new URL('./scratch/', import.meta.url)),approvalPolicy:'untrusted',sandbox:'read-only'});
   const threadId=t.thread.id;
   console.log('CREATED',threadId);
   await a.call('turn/start',{threadId,input:[{type:'text',text:'Connectivity probe. Do not use tools. Reply exactly FIRST_OK.'}]});
