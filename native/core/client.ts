@@ -4,6 +4,7 @@ import type { SessionSummary, SessionDetailResponse as Detail, HistoryWindowResp
 import { applySessionEvent, mergeSessionDetail, mergeResumedDetail } from "../../web/src/session-state";
 import { WsClient, type FakeableSocket } from "../../web/src/api/ws";
 import { mergeQuota } from "../../web/src/quota";
+import { mergeSessionList, mergeSessionSummary } from "../../web/src/session-cache";
 import { reconcileOutgoingHistory, type OutgoingMessage } from "../../web/src/message-history";
 
 export interface Port { call(op: string, data?: Record<string, unknown>): Promise<any>; }
@@ -63,6 +64,7 @@ export class Client {
   private rechecking = false;
   private disposed = false;
   private bootstrapping = false;
+  private refreshInFlight = false;
   constructor(private port: Port) {}
   changed() { if (!this.disposed) { this.view = { ...this.view }; this.onChange(); } }
   private async call(op: string, data: Record<string, unknown> = {}) {
@@ -138,12 +140,21 @@ export class Client {
     this.ws.onStateChange = state => { this.view.ws = state; if (state === "closed") this.view.fresh = false; this.changed(); };
     this.ws.onSnapshotRequired = async id => { this.view.fresh = false; this.http.delete(id); const d = await this.load(id); this.display(id, d); return d; };
     this.ws.subscribeList(event => {
-      if (event.type === "account.limits" && this.view.status) { this.view.status = { ...this.view.status, rateLimits: mergeQuota(this.view.status.rateLimits, event.limits) }; this.changed(); }
-      else this.scheduleRefresh();
+      // List events already carry authoritative summaries. Refetching here feeds
+      // desktop summary synchronization back into another full refresh.
+      if (event.type === "account.limits") {
+        if (this.view.status) this.view.status = { ...this.view.status, rateLimits: mergeQuota(this.view.status.rateLimits, event.limits) };
+      } else if (this.view.agent === "recent" || event.summary.agent === this.view.agent) {
+        const current = this.view.sessions.find(s => s.id === event.summary.id);
+        this.view.sessions = event.type === "session.deleted"
+          ? this.view.sessions.filter(s => s.id !== event.summary.id)
+          : [...this.view.sessions.filter(s => s.id !== event.summary.id), mergeSessionSummary(current, event.summary)];
+      }
+      this.changed();
     });
     this.ws.connect();
     if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => { if (this.active && this.view.pairing?.paired) { void this.refresh(); void this.recheck(); } }, 10_000);
+    this.timer = setInterval(() => { if (this.active && this.view.pairing?.paired) { void this.refresh(false, true); void this.recheck(); } }, 15_000);
   }
   socketEvent(e: { id: string; kind: string; data?: string }) {
     if (e.kind === "message") {
@@ -158,24 +169,25 @@ export class Client {
     else if (this.view.pairing?.paired) { this.ws?.connect(); void this.refresh(); void this.recheck(); }
     this.changed();
   }
-  private scheduleRefresh() { if (!this.refreshTimer) this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; if (this.active) void this.refresh(); }, 350); }
-  async refresh(forceLimits = false) {
-    if (!this.view.pairing?.paired || this.view.refreshing) return;
+  private scheduleRefresh() { if (!this.refreshTimer) this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; if (this.active) void this.refresh(false, true); }, 350); }
+  async refresh(forceLimits = false, background = false) {
+    if (!this.view.pairing?.paired || this.refreshInFlight) return;
+    this.refreshInFlight = true;
     const requestedAgent = this.view.agent;
-    this.view.refreshing = true; this.changed();
+    this.view.refreshing = !background; if (!background) this.changed();
     try {
       if (this.view.screen === "session") {
         const id = this.view.sessionId; this.display(id, await this.load(id));
       } else {
         const agent = this.view.agent;
         const value = SessionListResponse.parse(await this.request("/api/v1/sessions" + (agent === "recent" ? "" : `?scope=all&agent=${agent}`)));
-        if (agent === this.view.agent) this.view.sessions = value.sessions;
+        if (agent === this.view.agent) this.view.sessions = mergeSessionList({ sessions: this.view.sessions }, value).sessions;
         const status = StatusResponse.parse(await this.request("/api/v1/status" + (forceLimits ? "?refreshLimits=1" : "")));
         this.view.status = { ...status, rateLimits: mergeQuota(this.view.status?.rateLimits, status.rateLimits) };
       }
       this.view.online = true;
     } catch (e) { this.view.online = false; this.view.fresh = false; this.error(e); }
-    finally { this.view.refreshing = false; this.changed(); if (this.view.screen === "home" && requestedAgent !== this.view.agent) void this.refresh(); }
+    finally { this.refreshInFlight = false; this.view.refreshing = false; this.changed(); if (this.view.screen === "home" && requestedAgent !== this.view.agent) void this.refresh(); }
   }
   private display(id: string, detail: Detail) {
     if (this.view.sessionId !== id || this.view.screen !== "session") return;

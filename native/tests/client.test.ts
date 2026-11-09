@@ -32,6 +32,27 @@ function make() { const port = new FakePort(); const client = new Client(port); 
 afterEach(() => { for (const c of clients.splice(0)) c.dispose(); });
 
 describe("original client flow parity", () => {
+  test("list pushes update summaries without triggering a refresh feedback loop", async () => {
+    const { client, port } = make(); await client.bootstrap();
+    const socket = port.calls.find(c => c.op === "ws.open").id;
+    const before = port.calls.filter(c => c.op === "request").length;
+    for (let n = 1; n <= 30; n++) client.socketEvent({ id: socket, kind: "message", data: JSON.stringify({ type: "listEvent", event: { type: "session.updated", sessionId: "__all__", seq: n, at: n, summary: { ...summary, status: "running", statusUpdatedAt: n } } }) });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    expect(port.calls.filter(c => c.op === "request").length).toBe(before);
+    expect(client.view.sessions[0].status).toBe("running"); expect(client.view.refreshing).toBe(false);
+    await client.refresh(false, true);
+    expect(client.view.sessions[0].status).toBe("running");
+  });
+  test("background reconciliation has no visible refresh state and coalesces requests", async () => {
+    const { client, port } = make(); await client.bootstrap();
+    const seen: boolean[] = []; client.onChange = () => seen.push(client.view.refreshing);
+    const original = port.reply; let release!: () => void;
+    port.reply = async (path, method, body) => { if (path === "/api/v1/sessions") await new Promise<void>(r => { release = r; }); return original(path, method, body); };
+    const pending = client.refresh(false, true); await client.refresh(false, true); release(); await pending;
+    expect(seen.every(value => !value)).toBe(true);
+    port.reply = original; seen.length = 0; await client.refresh();
+    expect(seen).toContain(true); expect(seen.at(-1)).toBe(false);
+  });
   test("catalog search and scroll survive session return; back exits catalog", async () => {
     const { client } = make(); await client.bootstrap();
     client.home("codex"); client.view.query = "example"; client.view.listOffset = 450;

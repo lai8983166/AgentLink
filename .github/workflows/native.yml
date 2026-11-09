@@ -6,6 +6,7 @@ on:
       - 'shared/**'
       - 'web/src/api/ws*'
       - 'web/src/session-state*'
+      - 'web/src/session-cache*'
       - 'web/src/message-history*'
       - 'web/src/quota*'
       - 'mobile/**'
