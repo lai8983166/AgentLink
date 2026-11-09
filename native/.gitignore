@@ -2,6 +2,7 @@
 .nsh/
 release/
 android/app/src/main/assets/nsh/
+android/app/src/main/assets/notices/
 android/app/libs/*.aar
 android/.gradle/
 android/**/build/
