@@ -1,7 +1,7 @@
 import { expect, open, test } from "nsh/test";
 
 test("input and bidirectional host calls leave the typed text intact", async () => {
-  const app = await open("../App.tsx");
+  const app = await open("../Probe.tsx");
   await app.waitFor("text:安卓宿主已就绪");
   await app.type("label:验证输入", "人工测试：安卓输入");
   await app.press("label:验证双向通信");

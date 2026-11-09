@@ -2,12 +2,14 @@ package io.agentlink.nsh
 
 import android.app.Activity
 import android.os.Bundle
+import android.content.Intent
 import android.widget.TextView
 import com.longbridge.nsh.NshView
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
     private lateinit var view: NshView
+    private lateinit var bridge: ClientBridge
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var closed = false
 
@@ -15,7 +17,9 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         view = NshView(this)
         view.setStorageDirectory(java.io.File(filesDir, "nsh"))
-        view.setGrantedCapabilities("""{"host":["probe.ready","probe.echo","probe.save","probe.read"]}""")
+        check(view.setGrantedCapabilities("""{"host":["client.call","probe.ready","probe.echo","probe.save","probe.read"],"clipboard":true}"""))
+        view.setParams(mapOf("probe" to (BuildConfig.DEBUG && intent.getBooleanExtra("probe", false))))
+        bridge = ClientBridge(this, view)
         view.setErrorListener { showFailure() }
         view.handle("probe.ready") { _, reply -> reply.resolve(true) }
         view.handle("probe.echo") { data, reply ->
@@ -52,7 +56,7 @@ class MainActivity : Activity() {
         // Never forward VM exception text to logs: future screens may contain secrets.
         runOnUiThread {
             if (!closed) setContentView(TextView(this).apply {
-                text = "NSH 界面加载失败，请重新安装验证包"
+                text = "NSH 界面加载失败，请重新打开或更新应用"
                 setPadding(32, 64, 32, 32)
             })
         }
@@ -60,8 +64,12 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         closed = true
+        bridge.close()
         view.destroy()
         executor.shutdownNow()
         super.onDestroy()
     }
+    override fun onResume() { super.onResume(); if (::bridge.isInitialized) bridge.foreground() }
+    override fun onStop() { if (::bridge.isInitialized) bridge.background(); super.onStop() }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); bridge.navigate(intent) }
 }

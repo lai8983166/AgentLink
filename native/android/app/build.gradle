@@ -3,6 +3,15 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// The location and all signing secrets stay outside tracked source.
+def signingFile = file(System.getenv('AGENTLINK_SIGNING_PROPERTIES') ?: rootProject.file('keystore.properties'))
+def signingProperties = new Properties()
+if (signingFile.exists()) signingFile.withInputStream { signingProperties.load(it) }
+def releaseRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+if (releaseRequested && (!signingFile.exists() || ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].any { !signingProperties[it] })) {
+    throw new GradleException('Release signing missing: set AGENTLINK_SIGNING_PROPERTIES to a private keystore.properties file')
+}
+
 android {
     namespace 'io.agentlink.nsh'
     compileSdk 36
@@ -11,7 +20,7 @@ android {
         applicationId 'io.agentlink.nsh'
         minSdk 28
         targetSdk 36
-        versionCode 1
+        versionCode 2
         versionName '0.1.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         ndk { abiFilters 'arm64-v8a', 'x86_64' }
@@ -19,14 +28,28 @@ android {
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }
     kotlinOptions { jvmTarget = '21' }
+    signingConfigs {
+        if (signingFile.exists()) {
+            localRelease {
+                storeFile file(signingProperties['storeFile'])
+                storePassword signingProperties['storePassword']
+                keyAlias signingProperties['keyAlias']
+                keyPassword signingProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
-        debug { applicationIdSuffix '.debug'; versionNameSuffix '-probe' }
-        release { minifyEnabled false }
+        debug { applicationIdSuffix '.debug'; versionNameSuffix '-debug' }
+        release { minifyEnabled false; if (signingFile.exists()) signingConfig signingConfigs.localRelease }
     }
 }
 
 dependencies {
-    // Use the release runtime even in the probe: no remote code/dev server.
+    implementation project(':native-core')
+    implementation 'androidx.core:core:1.17.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    // Embedded release runtime: no remote code/dev server.
     implementation files('libs/nsh.aar')
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
     androidTestImplementation 'androidx.test:runner:1.7.0'
@@ -45,9 +68,3 @@ tasks.register('verifyNshInputs') {
     }
 }
 tasks.named('preBuild').configure { dependsOn 'verifyNshInputs' }
-// The phase-zero probe is deliberately not a production release.
-tasks.configureEach {
-    if (name == 'assembleRelease' || name == 'bundleRelease') {
-        doFirst { throw new GradleException('Phase-zero probe: release publishing is not configured') }
-    }
-}

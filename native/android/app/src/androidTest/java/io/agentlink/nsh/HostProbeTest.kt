@@ -1,6 +1,7 @@
 package io.agentlink.nsh
 
 import android.view.View
+import android.content.Intent
 import android.view.ViewGroup
 import android.widget.EditText
 import androidx.test.core.app.ActivityScenario
@@ -44,7 +45,8 @@ class HostProbeTest {
     }
 
     @Test fun hostEchoAndEncryptedReadSurviveRecreation() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        val intent = Intent(InstrumentationRegistry.getInstrumentation().targetContext, MainActivity::class.java).putExtra("probe", true)
+        ActivityScenario.launch<MainActivity>(intent).use { scenario ->
             waitText(scenario, "安卓宿主已就绪")
             scenario.onActivity { activity ->
                 descendants(activity.window.decorView).filterIsInstance<EditText>().single().setText("人工测试：安卓输入")

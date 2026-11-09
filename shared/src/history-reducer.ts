@@ -78,4 +78,3 @@ export function applyEventToHistory(history: HistoryItem[], e: SessionEvent): Hi
       return history;
   }
 }
-
