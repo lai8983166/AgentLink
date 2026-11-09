@@ -1,5 +1,11 @@
 import { Text, View, Clipboard, type JSX } from "nsh";
 import { Input } from "nsh/base";
+import sans from "../assets/fonts/SpaceGrotesk-Regular.ttf";
+import sansBold from "../assets/fonts/SpaceGrotesk-Bold.ttf";
+import mono from "../assets/fonts/SpaceMono-Regular.ttf";
+import monoBold from "../assets/fonts/SpaceMono-Bold.ttf";
+// Explicit imports register the real faces before rendering, including the bold mono face.
+export const fonts = { sans: `${sans}, ${sansBold}, sans-serif`, mono: `${mono}, ${monoBold}, monospace` };
 export const colors = { ink: "#221c0e", muted: "#6f654f", paper: "#fdf9ef", white: "#ffffff", accent: "#3d5ce5", line: "#e7dcc0", gold: "#ffd700", surface: "#f8f1dd" };
 export const inputStyle = { padding: 12, fontSize: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, borderRadius: 10, color: colors.ink };
 export function Field(p: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; masked?: boolean; multiline?: boolean; keyboard?: "url" }) {
