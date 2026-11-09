@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
+import io.agentlink.notifications.R
 import java.util.concurrent.atomic.AtomicInteger
 
 class NotificationService : Service() {
@@ -32,7 +33,7 @@ class NotificationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val connection = runCatching { state.connection() }.getOrNull()
         if (!state.enabled || connection == null) { stopSelf(); return START_NOT_STICKY }
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(this, 0, launchIntent(), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, CONNECTION).setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("AgentLink 正在保持连接").setContentText("接收任务完成和出错通知，点击打开")
             .setContentIntent(open).setOngoing(true).build()
@@ -87,7 +88,8 @@ class NotificationService : Service() {
             Thread.sleep(15000); return false
         }
         val path = payload.optString("url").takeIf(NotificationPolicy::safePath) ?: "/settings"
-        val intent = Intent(this, MainActivity::class.java).putExtra("notificationPath", path)
+        val intent = launchIntent().putExtra("notificationPath", path)
+            .putExtra("pairingScope", state.prefs.getString("pairingScope", null))
             .setData(android.net.Uri.parse("agentlink://notification/" + id))
         val pending = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         manager.notify(id, 2, NotificationCompat.Builder(this, TASKS).setSmallIcon(R.drawable.ic_notification)
@@ -100,4 +102,5 @@ class NotificationService : Service() {
         generation.incrementAndGet(); running = false; api?.cancel(); worker?.interrupt(); super.onDestroy()
     }
     override fun onBind(intent: Intent?): IBinder? = null
+    private fun launchIntent(): Intent = requireNotNull(packageManager.getLaunchIntentForPackage(packageName))
 }

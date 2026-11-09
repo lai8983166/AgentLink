@@ -26,7 +26,9 @@ release 包名采用 io.agentlink.nsh，debug 为 io.agentlink.nsh.debug，名�
 
 选择 TSX 是为了复用团队 TypeScript 经验和纯业务算法；纯 Rust 全量客户端会增加首版迁移成本，标准 NSH 打包宿主则不利于复用现有通知服务。采用自有 Gradle 宿主，因此不把 nsh package 默认打包流程当作正式发布流程。release 使用 release AAR 和内置资源，关闭开发服务器与远程代码更新；NSH CLI/AAR/bundle 固定同一经过验证的版本与校验值，优先验证官方发布版，必要源码构建也固定 commit。
 
-### D3 阶段零作为技术准入
+### D3 阶段零与延期设备验收
+
+2026-11-09 用户明确调整：继续实现全部客户端功能，最终交付 APK 手动验收。真机/模拟器不可用不再阻塞后续阶段，未执行项保留待验收；可自动执行的构建、契约和逻辑测试仍必须完成。下文的准入要求用于最终验收，不作为等待设备期间的开发门槛。
 
 先制作最小 Android debug 宿主：输入/安全区/返回键、host 双向通信、Keystore 重开读取、HTTPS 与 WS 假服务、原生通知点击。验证 arm64 真机与 x86_64 模拟器；minSdk 28，compile/target SDK 以当前 mobile 的 36 为集成起点，记录实际兼容的 JDK/NDK/Gradle/NSH 组合。
 

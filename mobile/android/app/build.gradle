@@ -51,6 +51,7 @@ repositories {
 }
 
 dependencies {
+    implementation project(':native-core')
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"

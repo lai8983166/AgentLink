@@ -1,5 +1,5 @@
 import { historyItemKey, type SessionDetailResponse, type SessionEvent } from "@agentlink/shared";
-import { applyEventToHistory } from "./store";
+import { applyEventToHistory } from "../../shared/src/history-reducer";
 
 /** 详情快照与实时事件共享序号，迟到的快照不能覆盖已经收到的事件。 */
 export function mergeSessionDetail(current: SessionDetailResponse | undefined, incoming: SessionDetailResponse): SessionDetailResponse {
