@@ -15,6 +15,8 @@ test("pair, browse a session, send and inspect native notification settings", as
   expect(app.texts().includes("CODEX")).toBe(true);
   await app.press("label:人工示例任务");
   await app.waitFor("text:人工构造的回复");
+  expect(app.spanStyle("text:人工构造的回复").fontSize).toBe(14);
+  expect(app.spanStyle("text:#人工示例任务").fontSize).toBe(16);
   await app.type("label:消息输入", "人工新指令");
   await app.press("label:发送消息");
   await app.waitFor("text:人工新指令");
@@ -50,6 +52,8 @@ test("catalog return, bottom task sheet, full-screen diff and audit navigation",
   expect(app.value("label:搜索会话")).toBe("人工");
   await app.press("label:新建任务");
   await app.waitFor("text:新任务");
+  expect(app.spanStyle("text:/^新任务$/").fontSize).toBe(17);
+  expect(app.spanStyle("text:/^新任务$/").fontWeight).toBe(700);
   await app.press("label:选择项目目录…");
   await app.waitFor("label:示例项目");
   await app.press("label:示例项目");
@@ -58,8 +62,29 @@ test("catalog return, bottom task sheet, full-screen diff and audit navigation",
   await app.press("label:取消");
   expect(app.value("label:搜索会话")).toBe("人工");
   await app.press("label:设置");
+  expect(app.spanStyle("text:/^设置$/").fontSize).toBe(16);
+  expect(app.texts().includes("家里 PC")).toBe(true);
+  expect(app.texts().includes("接入模式")).toBe(true);
   await app.press("label:审计日志 ›");
   await app.waitFor("text:echo synthetic-audit");
   await app.press("label:‹ 返回");
   await app.waitFor("label:下载安装包 / 检查更新");
+});
+
+test("background polling does not flash refresh feedback and new task still submits", async () => {
+  const app = await open("../App.tsx", { clock: {} });
+  await app.waitFor("label:配对");
+  await app.type("label:服务器地址", "https://agent.example.com");
+  await app.type("label:配对 token", "synthetic-token");
+  await app.press("label:配对");
+  await app.waitFor("label:人工示例任务");
+  await app.wait(16000);
+  expect(app.texts().includes("刷新中…")).toBe(false);
+  await app.press("label:新建任务");
+  await app.press("label:选择项目目录…");
+  await app.waitFor("label:示例项目");
+  await app.press("label:示例项目");
+  await app.type("label:任务描述", "人工创建指令");
+  await app.press("label:开始任务");
+  await app.waitFor("text:人工构造的回复");
 });
