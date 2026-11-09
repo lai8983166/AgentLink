@@ -6,6 +6,8 @@ on:
       - 'shared/**'
       - 'web/src/api/ws*'
       - 'web/src/session-state*'
+      - 'web/src/message-history*'
+      - 'web/src/quota*'
       - 'mobile/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/native.yml'

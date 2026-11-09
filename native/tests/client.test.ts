@@ -2,6 +2,7 @@ import { describe, test, expect, afterEach } from "bun:test";
 import { Client, canControl, decisions, decodeDetail, mergeWindow, type Port } from "../core/client";
 import { SessionListResponse, ServerMessage, NativeDelivery, MessageReceipt } from "../../shared/src/index";
 import { detail, status, summary } from "./fixtures";
+import { controls, quotaLines } from "../core/presentation";
 
 class FakePort implements Port {
   writes: any[] = []; calls: any[] = []; stored: Record<string, string> = {}; index = 0;
@@ -29,6 +30,52 @@ class FakePort implements Port {
 const clients: Client[] = [];
 function make() { const port = new FakePort(); const client = new Client(port); clients.push(client); return { port, client }; }
 afterEach(() => { for (const c of clients.splice(0)) c.dispose(); });
+
+describe("original client flow parity", () => {
+  test("catalog search and scroll survive session return; back exits catalog", async () => {
+    const { client } = make(); await client.bootstrap();
+    client.home("codex"); client.view.query = "example"; client.view.listOffset = 450;
+    await client.open(summary.id); client.back();
+    expect([client.view.agent, client.view.query, client.view.listOffset]).toEqual(["codex", "example", 450]);
+    client.back(); expect(client.view.agent).toBe("recent"); expect(client.view.query).toBe("");
+  });
+  test("new task opens as an overlay and cancelling never creates a session", async () => {
+    const { client, port } = make(); await client.bootstrap();
+    client.home("claude"); client.openNew(); client.chooseProject("/workspace/example"); client.view.prompt = "synthetic task";
+    expect(client.view.screen).toBe("home"); client.back();
+    expect(client.view.newTask).toBe(false); expect(client.view.agent).toBe("claude"); expect(port.writes).toHaveLength(0);
+  });
+  test("desktop actions are conditional, fork is only a missing-owner fallback", () => {
+    expect(controls(detail, true)).toMatchObject({ drive: true, desktop: false, interrupt: false, fork: false });
+    const desktop = { ...detail, session: { ...detail.session, desktopManaged: true, controlMode: "observe" as const } };
+    expect(controls(desktop, true)).toMatchObject({ takeover: true, resume: true, fork: false });
+    expect(controls(desktop, true, "IPC_OWNER_NOT_FOUND").fork).toBe(true);
+    expect(controls(desktop, false, "IPC_OWNER_NOT_FOUND").fork).toBe(false);
+    expect(controls({ ...detail, session: { ...detail.session, status: "running" } }, true).interrupt).toBe(true);
+    expect(canControl({ ...detail, session: { ...detail.session, desktopGone: true } }, true)).toBe(false);
+  });
+  test("authoritative messages replace local bubbles without hiding unresolved sends", async () => {
+    const { client } = make(); await client.bootstrap(); await client.open(summary.id);
+    client.view.outbox.messages = [{ id: "send-1", text: "synthetic", at: 2, afterId: "a", knownUserIds: [], state: "uncertain" }];
+    expect(client.conversation().history.at(-1)?.deliveryState).toBe("uncertain");
+    client.view.detail!.session.history.push({ type: "userMessage", id: "server-1", clientMessageId: "send-1", text: "synthetic", at: 2 });
+    expect(client.conversation().history.filter(i => i.type === "userMessage")).toHaveLength(1);
+    expect(client.conversation().confirmedIds).toEqual(["send-1"]);
+  });
+  test("audit pagination uses cursor and deduplicates; audit back returns settings", async () => {
+    const { client, port } = make(); await client.bootstrap();
+    const entry = { id: 2, at: 1, sessionId: "sample-session", project: "/workspace/example", kind: "command", command: "echo synthetic", decision: "accept", source: "mobile" };
+    port.reply = path => ({ entries: [entry], nextCursor: path.includes("cursor=2") ? null : 2 });
+    await client.loadAudit(true); await client.loadAudit();
+    expect(client.view.audit).toHaveLength(1); expect(client.view.auditCursor).toBeNull();
+    client.view.screen = "audit"; client.back(); expect(client.view.screen).toBe("settings");
+  });
+  test("expired quota never claims a reset balance", () => {
+    const rate = { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 1 }, secondary: null, measuredAt: 100, source: "history" as const };
+    expect(quotaLines(rate, false, 200000).join(" ")).toContain("等待更新");
+    expect(quotaLines(rate, false, 200000).join(" ")).not.toContain("剩余");
+  });
+});
 
 describe("NSH shared wire contracts", () => {
   test("Codex and disconnected Claude summaries use the same validators", () => {

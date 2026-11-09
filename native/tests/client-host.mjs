@@ -4,6 +4,7 @@ export async function createHost(player) {
   let sequence = 0;
   const saved = {};
   const session = { id: "sample-session", title: "人工示例任务", cwd: "/workspace/example", agent: "codex", status: "idle", preview: "人工示例", lastActivityAt: Date.now(), approvalPolicy: "on-request", pendingApprovals: 0, controlMode: "local", tokenUsage: null, approvals: [], history: [{ type: "agentMessage", id: "sample-message", text: "人工构造的回复", at: 1 }] };
+  session.history.push({ type: "toolCall", id: "file-1", kind: "fileChange", target: "example.txt", cmd: null, exitCode: 0, durationMs: 1, diffStat: { added: 1, removed: 1 }, outputTail: "-before\n+after", at: 2 });
   const pairing = () => ({ paired, scope: "test-scope", url: "https://agent.example.com", version: "test" });
   return { call(name, args) {
     if (name !== "client.call") throw new Error("unexpected host name");
@@ -19,7 +20,10 @@ export async function createHost(player) {
     if (op === "notifications.status") return { enabled: false, permission: false, running: false, state: "人工通知状态" };
     if (op === "request") {
       let body;
-      if (args.path === "/api/v1/status") body = { daemonVersion: "synthetic", mode: "local", latencyMs: 1, rateLimits: null, pendingApprovals: 0 };
+      if (args.path.startsWith("/api/v1/audit")) body = { entries: [{ id: 1, at: 1, sessionId: session.id, project: "/workspace/example", kind: "command", command: "echo synthetic-audit", decision: "accept", source: "mobile" }], nextCursor: null };
+      else if (args.path.startsWith("/api/v1/fs")) body = { path: "", entries: [{ name: "示例项目", path: "/workspace/example", kind: "dir" }] };
+      else if (args.path === "/api/v1/sessions" && args.method === "POST") body = { id: session.id };
+      else if (args.path.startsWith("/api/v1/status")) body = { daemonVersion: "synthetic", mode: "local", latencyMs: 1, rateLimits: null, pendingApprovals: 0 };
       else if (args.path === "/api/v1/sessions" || args.path.includes("scope=all")) body = { sessions: [session] };
       else if (args.path.endsWith("/message")) {
         const message = JSON.parse(args.body); session.history.push({ type: "userMessage", id: "u1", clientMessageId: message.clientMessageId, text: message.text, at: 2 }); sequence++;

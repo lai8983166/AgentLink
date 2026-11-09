@@ -2,17 +2,19 @@ import { expect, open, test } from "nsh/test";
 
 test("pair, browse a session, send and inspect native notification settings", async () => {
   const app = await open("../App.tsx");
-  await app.waitFor("text:连接你的电脑");
+  await app.waitFor("label:配对");
   await app.type("label:服务器地址", "https://agent.example.com");
   await app.type("label:配对 token", "synthetic-token");
-  await app.press("label:连接后台");
+  await app.press("label:配对");
   await app.waitFor("label:人工示例任务");
   await app.press("label:人工示例任务");
   await app.waitFor("text:人工构造的回复");
   await app.type("label:消息输入", "人工新指令");
   await app.press("label:发送消息");
-  await app.waitFor("text:已接收 · 人工新指令");
+  await app.waitFor("text:人工新指令");
+  expect(app.texts().filter(t => t === "人工新指令").length).toBe(1);
   expect(app.value("label:消息输入")).toBe("");
+  await app.press("label:‹ 返回");
   await app.press("label:设置");
   await app.waitFor("text:人工通知状态");
 });
@@ -20,5 +22,38 @@ test("pair, browse a session, send and inspect native notification settings", as
 test("cold launch restores a saved pairing from native launch parameters", async () => {
   const app = await open("../App.tsx", { host: { params: { pairing: { paired: true, scope: "test-scope", url: "https://agent.example.com" } } } });
   await app.waitFor("label:全部 Codex 会话");
-  expect(app.texts().includes("连接你的电脑")).toBe(false);
+  expect(app.texts().includes("// 粘贴电脑上的配对 token")).toBe(false);
+});
+
+test("catalog return, bottom task sheet, full-screen diff and audit navigation", async () => {
+  const app = await open("../App.tsx");
+  await app.type("label:服务器地址", "https://agent.example.com");
+  await app.type("label:配对 token", "synthetic-token");
+  await app.press("label:配对");
+  await app.waitFor("label:全部 Codex 会话");
+  await app.press("label:全部 Codex 会话");
+  await app.type("label:搜索会话", "人工");
+  await app.press("label:人工示例任务");
+  await app.waitFor("label:查看文件差异");
+  expect(app.texts().includes("接管原会话")).toBe(false);
+  expect(app.texts().includes("中断")).toBe(false);
+  await app.press("label:查看文件差异");
+  await app.waitFor("text:+after");
+  await app.press("label:关闭差异");
+  await app.press("label:‹ 返回");
+  expect(app.value("label:搜索会话")).toBe("人工");
+  await app.press("label:新建任务");
+  await app.waitFor("text:新任务");
+  await app.press("label:选择项目目录…");
+  await app.waitFor("label:示例项目");
+  await app.press("label:示例项目");
+  await app.type("label:任务描述", "人工任务描述");
+  await app.press("label:全自动");
+  await app.press("label:取消");
+  expect(app.value("label:搜索会话")).toBe("人工");
+  await app.press("label:设置");
+  await app.press("label:审计日志 ›");
+  await app.waitFor("text:echo synthetic-audit");
+  await app.press("label:‹ 返回");
+  await app.waitFor("label:下载安装包 / 检查更新");
 });

@@ -1,8 +1,10 @@
 import { SessionListResponse, SessionDetailResponse, HistoryWindowResponse, StatusResponse, FsListResponse,
-  MessageReceipt, ServerMessage, historyItemKey } from "../../shared/src/index";
+  MessageReceipt, ServerMessage, historyItemKey, AuditListResponse } from "../../shared/src/index";
 import type { SessionSummary, SessionDetailResponse as Detail, HistoryWindowResponse as WindowDetail, SessionEvent } from "../../shared/src/index";
 import { applySessionEvent, mergeSessionDetail, mergeResumedDetail } from "../../web/src/session-state";
 import { WsClient, type FakeableSocket } from "../../web/src/api/ws";
+import { mergeQuota } from "../../web/src/quota";
+import { reconcileOutgoingHistory, type OutgoingMessage } from "../../web/src/message-history";
 
 export interface Port { call(op: string, data?: Record<string, unknown>): Promise<any>; }
 export type Pairing = { paired: boolean; scope: string; url: string; pendingUnpair?: boolean; version?: string; navigation?: string };
@@ -12,9 +14,9 @@ export function decodePairing(value: unknown): Pairing {
   if (!p || typeof p.paired !== "boolean" || typeof p.scope !== "string" || typeof p.url !== "string" || (p.paired && (!p.scope || !p.url))) throw new Error("配对恢复响应不完整，请重试恢复");
   return p;
 }
-export type Outgoing = { id: string; text: string; state: "sending" | "queued" | "accepted" | "failed" | "uncertain" };
+export type Outgoing = OutgoingMessage;
 type Box = { draft: string; messages: Outgoing[] };
-export type Screen = "home" | "session" | "settings" | "new";
+export type Screen = "home" | "session" | "settings" | "audit";
 export class ApiError extends Error { constructor(public status: number, public code: string, text: string) { super(text); } }
 export function decodeDetail(raw: unknown): Detail | WindowDetail {
   return raw && typeof raw === "object" && "historySync" in raw ? HistoryWindowResponse.parse(raw) : SessionDetailResponse.parse(raw);
@@ -30,7 +32,7 @@ export function mergeWindow(previous: Detail | undefined, wire: WindowDetail | D
   return { ...detail, session: { ...detail.session, history: sync.order.map(id => items.get(id)!) } };
 }
 export function canControl(detail: Detail | undefined, fresh: boolean): boolean {
-  if (!fresh || !detail || detail.historyPage?.cached || detail.session.status === "unknown") return false;
+  if (!fresh || !detail || detail.historyPage?.cached || detail.session.status === "unknown" || detail.session.desktopGone) return false;
   const s = detail.session;
   return s.agent === "claude" ? !!s.terminal?.connected && !s.terminal.inputBlocked : s.controlMode === "local" || s.controlMode === "takeover";
 }
@@ -42,6 +44,9 @@ export class Client {
   view = { pairing: null as Pairing | null, startup: "loading" as "loading" | "ready" | "error", screen: "home" as Screen, sessions: [] as SessionSummary[],
     agent: "recent" as "recent" | "codex" | "claude", query: "", limit: 50, sessionId: "", detail: undefined as Detail | undefined,
     fresh: false, online: false, ws: "idle", busy: false, notice: "", status: null as any, notifications: null as any,
+    refreshing: false, checkedAt: 0, lastErrorCode: "", listOffset: 0,
+    newTask: false, browsing: false, audit: [] as AuditListResponse["entries"], auditCursor: null as number | null, auditLoaded: false,
+    approvalResults: [] as { id: string; command: string; decision: string }[],
     fs: null as any, project: "", policy: "on-request", prompt: "", outbox: { draft: "", messages: [] } as Box };
   onChange = () => {};
   private generation = 0;
@@ -83,7 +88,7 @@ export class Client {
           for (const [id, raw] of Object.entries(boxes)) {
             const b = raw as Box;
             if (typeof b?.draft !== "string" || !Array.isArray(b.messages)) continue;
-            this.boxes[id] = { draft: b.draft, messages: b.messages.filter(m => typeof m.id === "string" && typeof m.text === "string" && ["sending", "queued", "accepted", "failed", "uncertain"].includes(m.state)).map(m => ({ ...m, state: m.state === "sending" ? "uncertain" : m.state })) };
+            this.boxes[id] = { draft: b.draft, messages: b.messages.filter(m => typeof m.id === "string" && typeof m.text === "string" && ["sending", "queued", "accepted", "failed", "uncertain"].includes(m.state)).map(m => ({ ...m, at: m.at ?? 0, afterId: m.afterId ?? null, knownUserIds: m.knownUserIds ?? [], state: m.state === "sending" ? "uncertain" : m.state })) };
           }
         } catch { this.view.notice = "本地缓存不可用，正在联网读取"; }
         this.connect(); await this.refresh();
@@ -109,6 +114,7 @@ export class Client {
       finally {
         this.generation++; this.http.clear(); this.boxes = {}; this.pending.clear();
         this.view.detail = undefined; this.view.sessions = []; this.view.outbox = { draft: "", messages: [] };
+        this.view.audit = []; this.view.auditLoaded = false; this.view.status = null; this.view.newTask = false;
         this.view.pairing = await this.port.call("bootstrap"); this.view.screen = "settings";
       }
     });
@@ -131,7 +137,10 @@ export class Client {
     });
     this.ws.onStateChange = state => { this.view.ws = state; if (state === "closed") this.view.fresh = false; this.changed(); };
     this.ws.onSnapshotRequired = async id => { this.view.fresh = false; this.http.delete(id); const d = await this.load(id); this.display(id, d); return d; };
-    this.ws.subscribeList(() => this.scheduleRefresh());
+    this.ws.subscribeList(event => {
+      if (event.type === "account.limits" && this.view.status) { this.view.status = { ...this.view.status, rateLimits: mergeQuota(this.view.status.rateLimits, event.limits) }; this.changed(); }
+      else this.scheduleRefresh();
+    });
     this.ws.connect();
     if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => { if (this.active && this.view.pairing?.paired) { void this.refresh(); void this.recheck(); } }, 10_000);
@@ -150,8 +159,10 @@ export class Client {
     this.changed();
   }
   private scheduleRefresh() { if (!this.refreshTimer) this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; if (this.active) void this.refresh(); }, 350); }
-  async refresh() {
-    if (!this.view.pairing?.paired) return;
+  async refresh(forceLimits = false) {
+    if (!this.view.pairing?.paired || this.view.refreshing) return;
+    const requestedAgent = this.view.agent;
+    this.view.refreshing = true; this.changed();
     try {
       if (this.view.screen === "session") {
         const id = this.view.sessionId; this.display(id, await this.load(id));
@@ -159,15 +170,16 @@ export class Client {
         const agent = this.view.agent;
         const value = SessionListResponse.parse(await this.request("/api/v1/sessions" + (agent === "recent" ? "" : `?scope=all&agent=${agent}`)));
         if (agent === this.view.agent) this.view.sessions = value.sessions;
-        this.view.status = StatusResponse.parse(await this.request("/api/v1/status"));
+        const status = StatusResponse.parse(await this.request("/api/v1/status" + (forceLimits ? "?refreshLimits=1" : "")));
+        this.view.status = { ...status, rateLimits: mergeQuota(this.view.status?.rateLimits, status.rateLimits) };
       }
       this.view.online = true;
     } catch (e) { this.view.online = false; this.view.fresh = false; this.error(e); }
-    this.changed();
+    finally { this.view.refreshing = false; this.changed(); if (this.view.screen === "home" && requestedAgent !== this.view.agent) void this.refresh(); }
   }
   private display(id: string, detail: Detail) {
     if (this.view.sessionId !== id || this.view.screen !== "session") return;
-    this.view.detail = mergeSessionDetail(this.view.detail, detail); this.view.fresh = true; this.view.online = true; this.changed();
+    this.view.detail = mergeSessionDetail(this.view.detail, detail); this.view.fresh = true; this.view.online = true; this.view.checkedAt = Date.now(); this.changed();
   }
   async load(id: string, older = false): Promise<Detail> {
     const pending = this.pending.get(id);
@@ -194,14 +206,14 @@ export class Client {
   }
   async open(id: string) {
     this.unlisten?.(); this.view.screen = "session"; this.view.sessionId = id; this.view.fresh = false;
-    this.view.detail = undefined; this.view.notice = "";
+    this.view.detail = undefined; this.view.notice = ""; this.view.lastErrorCode = ""; this.view.approvalResults = [];
     this.view.outbox = this.boxes[id] ??= { draft: "", messages: [] };
     const cached = this.http.get(id);
     if (cached) this.view.detail = { ...cached, historyPage: cached.historyPage ? { ...cached.historyPage, cached: true } : undefined,
       session: { ...cached.session, status: "unknown", controlMode: "observe", approvals: [] } };
     this.changed();
     this.unlisten = this.ws?.subscribe(id, e => this.event(e));
-    await this.refresh();
+    try { this.display(id, await this.load(id)); } catch (e) { this.error(e); }
     const s = this.view.detail?.session;
     if (this.view.sessionId === id && s?.agent === "codex" && (s.desktopManaged || s.activeElsewhere)) {
       try { await this.request(`/api/v1/sessions/${encodeURIComponent(id)}/observe`, "POST", { mode: "observe" }); await this.refresh(); }
@@ -216,8 +228,22 @@ export class Client {
     if (e.type === "error") this.view.notice = e.message;
     this.changed();
   }
-  home(agent = this.view.agent) { this.unlisten?.(); this.unlisten = undefined; this.view.screen = "home"; this.view.agent = agent; this.view.limit = 50; this.view.query = ""; this.changed(); void this.refresh(); }
-  screen(screen: Screen) { this.unlisten?.(); this.view.screen = screen; this.changed(); if (screen === "settings") void this.notifications("status"); }
+  home(agent = this.view.agent) { this.unlisten?.(); this.unlisten = undefined; this.view.screen = "home"; if (agent !== this.view.agent) { this.view.agent = agent; this.view.limit = 50; this.view.query = ""; this.view.listOffset = 0; } this.changed(); void this.refresh(); }
+  back() { if (this.view.newTask) this.closeNew(); else if (this.view.screen === "audit") this.screen("settings"); else if (this.view.screen !== "home") this.home(); else if (this.view.agent !== "recent") this.home("recent"); else return false; return true; }
+  screen(screen: Screen) { this.unlisten?.(); this.view.screen = screen; this.changed(); if (screen === "settings") void this.notifications("status"); if (screen === "audit") void this.loadAudit(true); }
+  openNew() { this.view.newTask = true; this.view.browsing = false; this.view.fs = null; this.view.project = ""; this.view.prompt = ""; this.view.policy = "on-request"; this.changed(); }
+  closeNew() { if (!this.view.busy) { this.view.newTask = false; this.changed(); } }
+  chooseProject(path: string) { this.view.project = path; this.view.browsing = false; this.changed(); }
+  async loadAudit(reset = false) {
+    await this.perform(async () => {
+      const cursor = reset ? null : this.view.auditCursor;
+      const result = AuditListResponse.parse(await this.request("/api/v1/audit?limit=50" + (cursor === null ? "" : `&cursor=${cursor}`)));
+      this.view.audit = [...(reset ? [] : this.view.audit), ...result.entries].filter((e, i, all) => all.findIndex(x => x.id === e.id) === i);
+      this.view.auditCursor = result.nextCursor; this.view.auditLoaded = true;
+    });
+  }
+  conversation() { return reconcileOutgoingHistory(this.view.detail?.session.history ?? [], this.view.outbox.messages); }
+  async clearAccepted(ids: string[]) { this.view.outbox.messages = this.view.outbox.messages.filter(m => m.state !== "accepted" || !ids.includes(m.id)); await this.saveBoxes().catch(e => this.error(e)); this.changed(); }
   filtered() {
     const q = this.view.query.toLowerCase();
     return this.view.sessions.filter(s => (this.view.agent === "recent" ? s.lastActivityAt >= Date.now() - 30 * 86400000 : s.agent === this.view.agent) && `${s.title} ${s.cwd}`.toLowerCase().includes(q))
@@ -230,7 +256,8 @@ export class Client {
     if (!canControl(this.view.detail, this.view.fresh) || !this.view.outbox.draft.trim()) return;
     const id = this.view.sessionId, box = this.view.outbox, originalDraft = box.draft, text = originalDraft.trim();
     await this.perform(async () => {
-      const message: Outgoing = { id: await this.call("uuid"), text, state: "sending" };
+      const history = this.view.detail?.session.history ?? [];
+      const message: Outgoing = { id: await this.call("uuid"), text, state: "sending", at: Date.now(), afterId: history.at(-1)?.id ?? null, knownUserIds: history.filter(h => h.type === "userMessage").map(h => h.id) };
       box.messages.push(message);
       try { await this.saveBoxes(); } catch (e) { message.state = "failed"; throw e; }
       if (box.draft === originalDraft) box.draft = "";
@@ -283,7 +310,7 @@ export class Client {
     const approval = this.view.detail?.session.approvals?.find(a => a.approvalId === id);
     if (!approval || !decisions(approval.availableDecisions).includes(decision)) return;
     await this.perform(async () => {
-      try { await this.request(`/api/v1/sessions/${encodeURIComponent(this.view.sessionId)}/approvals/${encodeURIComponent(id)}`, "POST", { decision }); this.view.notice = "审批已确认"; }
+      try { await this.request(`/api/v1/sessions/${encodeURIComponent(this.view.sessionId)}/approvals/${encodeURIComponent(id)}`, "POST", { decision }); this.view.approvalResults.push({ id, command: approval.command ?? "文件改动", decision }); this.view.notice = "审批已确认"; }
       finally { await this.refresh(); }
     });
   }
@@ -292,13 +319,15 @@ export class Client {
     if (!this.view.project || !this.view.prompt.trim()) return;
     await this.perform(async () => {
       const result = await this.request("/api/v1/sessions", "POST", { projectPath: this.view.project, approvalPolicy: this.view.policy, prompt: this.view.prompt });
-      this.view.prompt = ""; await this.open(result.id);
+      this.view.prompt = ""; this.view.newTask = false; await this.open(result.id);
     });
   }
   async notifications(action: string) {
-    await this.perform(async () => { if (action !== "status") await this.call(`notifications.${action}`); this.view.notifications = await this.call("notifications.status"); });
+    if (action === "status") { try { this.view.notifications = await this.call("notifications.status"); this.changed(); } catch (e) { this.error(e); } return; }
+    await this.perform(async () => { await this.call(`notifications.${action}`); this.view.notifications = await this.call("notifications.status"); if (action === "test") this.view.notice = "测试通知已入队，请检查通知栏；这不代表手机已经展示。"; });
   }
-  error(e: unknown) { this.view.notice = e instanceof Error ? e.message : "操作失败，请重试"; this.changed(); }
+  async downloadPage() { try { await this.call("downloads.open"); } catch (e) { this.error(e); } }
+  error(e: unknown) { this.view.notice = e instanceof Error ? e.message : "操作失败，请重试"; this.view.lastErrorCode = e instanceof ApiError ? e.code : ""; this.changed(); }
   async perform(action: () => Promise<void>) {
     if (this.view.busy) return;
     this.view.busy = true; this.view.notice = ""; this.changed();
