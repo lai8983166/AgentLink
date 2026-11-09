@@ -4,6 +4,8 @@
 
 当前为 **0.1.0 手机试用版**：构建和自动测试通过不代表真机验收通过。[验证记录](VALIDATION.md) 明确列出未验证项。可以直接将 APK 传到手机安装，**无需 USB**。
 
+后台网页“设置 → 安卓客户端下载”提供原版与 NSH 测试版独立下载；也可打开同一后台地址的 `/downloads/` 选择版本。NSH 文件地址为 `/downloads/agentlink-nsh.apk`，原版 `/downloads/agentlink.apk` 保持不变。后台需运行包含该路由的版本，并已生成相应 release APK。
+
 ## 安装和使用
 
 1. 将 native/release/AgentLink-NSH.apk 传到 Android 9 或更高版本的手机，允许文件来源安装应用。支持 arm64-v8a 和 x86_64，不支持仅 32 位的设备。

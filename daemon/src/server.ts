@@ -30,6 +30,7 @@ import { compress } from "hono/compress";
 import { ClaudeSessions } from "./claude/sessions";
 import { ClaudeCatalog } from "./claude/catalog";
 import { homedir } from "node:os";
+import { createDownloadsRouter } from "./routes/downloads";
 
 export const { upgradeWebSocket, websocket } = createBunWebSocket();
 
@@ -125,11 +126,10 @@ export function createApp(opts: {
   app.route("/", createPushRouter(push, auth));
   app.route("/", createNativePushRouter(push, auth));
   // 安装包不含配对信息；同一 HTTPS 入口提供自用 APK 下载。
-  app.get("/downloads/agentlink.apk", () => {
-    const apk = join(import.meta.dir, "../../mobile/release/AgentLink.apk");
-    if (!existsSync(apk)) return new Response("Android APK has not been built", { status: 404 });
-    return new Response(Bun.file(apk), { headers: { "Content-Type": "application/vnd.android.package-archive", "Content-Disposition": "attachment; filename=AgentLink.apk", "Cache-Control": "no-store" } });
-  });
+  app.route("/", createDownloadsRouter({
+    original: join(import.meta.dir, "../../mobile/release/AgentLink.apk"),
+    nsh: join(import.meta.dir, "../../native/release/AgentLink-NSH.apk"),
+  }));
 
   // token 轮换（remote-access spec：轮换后旧 token 立即失效）
   app.post("/api/v1/admin/token/rotate", async (c) => {

@@ -75,6 +75,13 @@ export function Settings() {
           </div>
         </div>
 
+        <div className="section-label">安卓客户端下载</div>
+        <div className="card" style={{ cursor: "default", fontSize: 13, lineHeight: 1.8 }}>
+          <a href={`${serverBase()}/downloads/agentlink.apk`}>下载原版 APK</a>
+          <div><a href={`${serverBase()}/downloads/agentlink-nsh.apk`}>下载 NSH 测试版 APK</a></div>
+          <div style={{ color: "var(--text-dim)" }}>两版可同时安装、各自配对。NSH 版需 Android 9 及以上，手机体验待验证。</div>
+          <a href={`${serverBase()}/downloads/`} target="_blank" rel="noreferrer">打开下载页面</a>
+        </div>
         <KeyboardDiagnostics />
         {isAndroidApp() ? <NativePushSettings /> : <PushSettings />}
 

@@ -62,7 +62,7 @@ shared/src 为线协议参考。新增人工构造的 JSON 契约样例，由现
 
 建立功能对照表：核心会话行为必须同时验收；首版暂缓审计浏览、额度面板、PWA 更新等辅助功能并明确标记。共享契约变更必须更新两套解析测试和功能对照；平台体验可独立演进。CI 分开检查 web/daemon 与 native，协议或共享 Kotlin 修改触发双方检查。
 
-独立签名 APK 输出 native/release/AgentLink-NSH.apk 与 SHA-256，通过文件交付/手动安装；本变更不新增 daemon 下载路由，不覆盖 mobile/release/AgentLink.apk。签名材料在仓库外，缺失时 release 明确失败。所有文档、测试和可提交验收记录只使用人工样例及去身份化指标。
+独立签名 APK 输出 native/release/AgentLink-NSH.apk 与 SHA-256。按用户后续要求，后台新增 /downloads/agentlink-nsh.apk 供手机下载，并提供 /downloads/ 版本选择页与网页设置入口；原版 /downloads/agentlink.apk 保持不变，不覆盖 mobile/release/AgentLink.apk。签名材料在仓库外，缺失时 release 明确失败。所有文档、测试和可提交验收记录只使用人工样例及去身份化指标。
 
 ## Risks / Trade-offs
 

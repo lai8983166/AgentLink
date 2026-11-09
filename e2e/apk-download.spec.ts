@@ -9,13 +9,15 @@ test.beforeEach(async ({ page, context, request }) => {
   // 仅替换网络层的文件内容，真实 Service Worker 必须主动放行下载导航。
   await context.route("**/downloads/agentlink.apk", (route) => route.fulfill({ status: 200,
     headers: { "Content-Type": "application/vnd.android.package-archive", "Content-Disposition": "attachment; filename=AgentLink.apk" }, body: apk }));
+  await context.route("**/downloads/agentlink-nsh.apk", (route) => route.fulfill({ status: 200,
+    headers: { "Content-Type": "application/vnd.android.package-archive", "Content-Disposition": "attachment; filename=AgentLink-NSH.apk" }, body: apk }));
 });
 async function downloadApk(page: Page) {
   const pending = page.waitForEvent("download", { timeout: 5000 });
   await page.goto("/downloads/agentlink.apk").catch((error) => { if (!String(error).includes("ERR_ABORTED") && !String(error).includes("Download is starting")) throw error; });
   const download = await pending;
   expect(download.suggestedFilename()).toBe("AgentLink.apk");
-  expect(readFileSync((await download.path())!)).toEqual(apk);
+  expect(readFileSync((await download.path())!).equals(apk)).toBe(true);
 }
 test("已安装网页缓存时 APK 仍下载文件，API 地址也不回落到聊天页面", async ({ page }) => {
   await page.goto("/settings");
@@ -24,6 +26,19 @@ test("已安装网页缓存时 APK 仍下载文件，API 地址也不回落到�
   const response = await page.goto("/api/v1/health");
   expect(response?.fromServiceWorker()).toBe(false);
   expect(await response?.json()).toMatchObject({ ok: true, daemon: "agentlink" });
+});
+
+test("设置分别下载原版和 NSH 测试版，缓存不拦截 APK", async ({ page }) => {
+  await page.goto("/settings");
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
+  for (const [label, filename] of [["下载原版 APK", "AgentLink.apk"], ["下载 NSH 测试版 APK", "AgentLink-NSH.apk"]] as const) {
+    const pending = page.waitForEvent("download");
+    await page.getByRole("link", { name: label, exact: true }).click();
+    const download = await pending;
+    expect(download.suggestedFilename()).toBe(filename);
+    expect(readFileSync((await download.path())!).equals(apk)).toBe(true);
+  }
+  await expect(page.getByRole("link", { name: "打开下载页面" })).toHaveAttribute("href", "/downloads/");
 });
 
 test("旧缓存造成下载空白后，更新 Service Worker 即恢复下载且保留配对", async ({ page, request }) => {
