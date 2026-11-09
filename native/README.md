@@ -68,3 +68,5 @@ node native/scripts/release.mjs
 0.1.1 将本机配对状态在界面加载前传入，区分恢复中/读取失败/未配对，并提供重试恢复。界面使用原版米白、黄色及描边风格，但尚未完成逐屏一致性验收。更新请覆盖安装，不要先卸载或清除数据；真机反馈的重开配对问题仍需用户复验。
 
 打包选项依据：[Android JNI 压缩](https://developer.android.com/reference/tools/gradle-api/8.12/com/android/build/api/variant/JniLibsApkPackaging)、[DEX 压缩](https://developer.android.com/reference/tools/gradle-api/8.8/com/android/build/api/dsl/DexPackaging)。
+
+0.1.2 按原版重建页面结构与操作路径：配对卡片、分组列表与额度、条件控制横幅、对话内审批、消息合并、工具/全屏差异、新任务底部弹层、设置与审计。返回保留目录和搜索；更新入口打开后台双版本下载页。逐屏真机视觉和输入法仍待验收，具体平台差异见 COMPATIBILITY.md。
