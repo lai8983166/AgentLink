@@ -11,7 +11,7 @@ test("pair, browse a session, send and inspect native notification settings", as
   expect(app.spanStyle("text:AgentLink").fontWeight).toBe(700);
   expect(app.spanStyle("text:#人工示例任务").fontSize).toBe(15);
   expect(app.spanStyle("text:#人工示例任务").fontWeight).toBe(700);
-  expect(app.spanStyle("text:/^人工示例$/").fontSize).toBe(12.5);
+  expect(app.spanStyle("label:人工示例任务 >> text:/^人工示例$/").fontSize).toBe(12.5);
   expect(app.texts().includes("CODEX")).toBe(true);
   await app.press("label:人工示例任务");
   await app.waitFor("text:人工构造的回复");
@@ -31,6 +31,34 @@ test("cold launch restores a saved pairing from native launch parameters", async
   const app = await open("../App.tsx", { host: { params: { pairing: { paired: true, scope: "test-scope", url: "https://agent.example.com" } } } });
   await app.waitFor("label:全部 Codex 会话");
   expect(app.texts().includes("// 粘贴电脑上的配对 token")).toBe(false);
+});
+
+test("approval resolution, tool expansion and read-only desktop states", async () => {
+  const app = await open("../App.tsx");
+  await app.type("label:服务器地址", "https://agent.example.com");
+  await app.type("label:配对 token", "synthetic-token");
+  await app.press("label:配对");
+  await app.waitFor("label:人工审批任务");
+  await app.press("label:人工审批任务");
+  await app.waitFor("label:批准");
+  expect(app.spanStyle("text:echo synthetic").fontSize).toBe(12.5);
+  await app.press("label:批准");
+  await app.waitFor("text:/✓ 已批准/");
+  expect(app.texts().includes("批准，且本会话内不再询问此类操作")).toBe(false);
+  await app.press("label:‹ 返回");
+  await app.press("label:人工示例任务");
+  await app.waitFor("label:展开工具输出");
+  expect(app.texts().includes("synthetic-output")).toBe(false);
+  await app.press("label:展开工具输出");
+  await app.waitFor("text:synthetic-output");
+  expect(app.spanStyle("text:/^synthetic-output$/").fontSize).toBe(11);
+  await app.press("label:展开工具输出");
+  expect(app.texts().includes("synthetic-output")).toBe(false);
+  await app.press("label:‹ 返回");
+  await app.press("label:人工观察任务");
+  await app.waitFor("label:接管此会话");
+  await app.type("label:消息输入", "人工观察草稿");
+  await expect(app.press("label:发送消息")).rejects.toThrow();
 });
 
 test("catalog return, bottom task sheet, full-screen diff and audit navigation", async () => {

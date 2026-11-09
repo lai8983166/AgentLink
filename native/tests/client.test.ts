@@ -32,6 +32,17 @@ function make() { const port = new FakePort(); const client = new Client(port); 
 afterEach(() => { for (const c of clients.splice(0)) c.dispose(); });
 
 describe("original client flow parity", () => {
+  test("live activity and queued count belong only to the open session", async () => {
+    const { client, port } = make(); await client.bootstrap(); await client.open(summary.id);
+    const socket = port.calls.find(c => c.op === "ws.open").id;
+    for (const event of [
+      { type: "session.status", status: "running", activity: "echo synthetic", seq: 11 },
+      { type: "session.queue", queued: 2, seq: 12 },
+    ]) client.socketEvent({ id: socket, kind: "message", data: JSON.stringify({ type: "event", event: { ...event, sessionId: summary.id, at: 1, serverEpoch: detail.serverEpoch } }) });
+    expect(client.view.activity).toBe("echo synthetic"); expect(client.view.queued).toBe(2);
+    await client.open(summary.id);
+    expect(client.view.activity).toBe(""); expect(client.view.queued).toBe(0);
+  });
   test("list pushes update summaries without triggering a refresh feedback loop", async () => {
     const { client, port } = make(); await client.bootstrap();
     const socket = port.calls.find(c => c.op === "ws.open").id;

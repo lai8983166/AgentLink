@@ -45,7 +45,7 @@ export class Client {
   view = { pairing: null as Pairing | null, startup: "loading" as "loading" | "ready" | "error", screen: "home" as Screen, sessions: [] as SessionSummary[],
     agent: "recent" as "recent" | "codex" | "claude", query: "", limit: 50, sessionId: "", detail: undefined as Detail | undefined,
     fresh: false, online: false, ws: "idle", busy: false, notice: "", status: null as any, notifications: null as any,
-    refreshing: false, checkedAt: 0, lastErrorCode: "", listOffset: 0,
+    refreshing: false, checkedAt: 0, lastErrorCode: "", listOffset: 0, activity: "", queued: 0,
     newTask: false, browsing: false, audit: [] as AuditListResponse["entries"], auditCursor: null as number | null, auditLoaded: false,
     approvalResults: [] as { id: string; command: string; decision: string }[],
     fs: null as any, project: "", policy: "on-request", prompt: "", outbox: { draft: "", messages: [] } as Box };
@@ -218,7 +218,7 @@ export class Client {
   }
   async open(id: string) {
     this.unlisten?.(); this.view.screen = "session"; this.view.sessionId = id; this.view.fresh = false;
-    this.view.detail = undefined; this.view.notice = ""; this.view.lastErrorCode = ""; this.view.approvalResults = [];
+    this.view.detail = undefined; this.view.notice = ""; this.view.lastErrorCode = ""; this.view.approvalResults = []; this.view.activity = ""; this.view.queued = 0;
     this.view.outbox = this.boxes[id] ??= { draft: "", messages: [] };
     const cached = this.http.get(id);
     if (cached) this.view.detail = { ...cached, historyPage: cached.historyPage ? { ...cached.historyPage, cached: true } : undefined,
@@ -237,6 +237,8 @@ export class Client {
     if (e.sessionId !== this.view.sessionId) return;
     if (!this.view.fresh || e.type === "history.sync" || (this.view.detail?.serverEpoch && e.serverEpoch !== this.view.detail.serverEpoch)) { this.scheduleRefresh(); return; }
     this.view.detail = applySessionEvent(this.view.detail, e);
+    if (e.type === "session.status") this.view.activity = e.activity ?? "";
+    if (e.type === "session.queue") this.view.queued = e.queued;
     if (e.type === "error") this.view.notice = e.message;
     this.changed();
   }
@@ -338,7 +340,7 @@ export class Client {
     if (action === "status") { try { this.view.notifications = await this.call("notifications.status"); this.changed(); } catch (e) { this.error(e); } return; }
     await this.perform(async () => { await this.call(`notifications.${action}`); this.view.notifications = await this.call("notifications.status"); if (action === "test") this.view.notice = "测试通知已入队，请检查通知栏；这不代表手机已经展示。"; });
   }
-  async downloadPage() { try { await this.call("downloads.open"); } catch (e) { this.error(e); } }
+  async downloadPage(variant?: "original" | "nsh") { try { await this.call("downloads.open", { variant }); } catch (e) { this.error(e); } }
   error(e: unknown) { this.view.notice = e instanceof Error ? e.message : "操作失败，请重试"; this.view.lastErrorCode = e instanceof ApiError ? e.code : ""; this.changed(); }
   async perform(action: () => Promise<void>) {
     if (this.view.busy) return;

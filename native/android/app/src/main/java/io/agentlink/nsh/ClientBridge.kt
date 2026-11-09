@@ -145,7 +145,10 @@ class ClientBridge(private val activity: Activity, private val view: NshView) {
                 .put("permission", permitted()).put("state", state.prefs.getString("state", "尚未开启"))
                 .put("lastDeliveredAt", state.prefs.getLong("lastDeliveredAt", 0))
                 .put("batteryExempt", activity.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(activity.packageName))
-            "downloads.open" -> { activity.runOnUiThread { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(c.url + "/downloads/"))) }; true }
+            "downloads.open" -> {
+                val path = when (data.optString("variant")) { "original" -> "/downloads/agentlink.apk"; "nsh" -> "/downloads/agentlink-nsh.apk"; else -> "/downloads/" }
+                activity.runOnUiThread { activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(c.url + path))) }; true
+            }
             "notifications.start" -> {
                 check(permitted()) { "请在系统设置中允许通知" }
                 val api = NativeApi(c); try { api.register() } catch (e: ApiFailure) { throw IllegalStateException(if (e.status == 404) "后台不支持安卓通知，请更新后台" else "通知注册失败，请检查配对") } finally { api.close() }

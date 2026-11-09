@@ -1,0 +1,10 @@
+import { Scroll, View, Text as NativeText } from "nsh";
+import { IconButton } from "./Icon";
+import { Text, colors, fonts } from "./ui";
+export type DiffContent = { title: string; text: string; added?: number; removed?: number };
+export function Diff(p: { value: DiffContent; close: () => void; top: number; bottom: number }) {
+  return <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, paddingTop: p.top, paddingBottom: p.bottom, backgroundColor: colors.paper }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 16, backgroundColor: colors.white, borderBottomWidth: 1.5, borderColor: colors.ink }}><IconButton plain name="back" label="关闭差异" onPress={p.close} /><View style={{ flex: 1 }}><Text style={{ fontSize: 14, fontWeight: 700 }}>改动预览</Text><Text style={{ fontFamily: fonts.mono, fontSize: 11, color: "#a29877", numberOfLines: 1, textOverflow: "ellipsis" }}>{p.value.title}</Text></View><If when={p.value.added !== undefined}><Text style={{ fontFamily: fonts.mono, fontSize: 11, fontWeight: 700 }}><NativeText style={{ color: "#1f8a3b" }}>+{p.value.added}</NativeText> <NativeText style={{ color: "#d24430" }}>−{p.value.removed}</NativeText></Text></If></View>
+    <Scroll style={{ flex: 1 }} contentStyle={{ paddingVertical: 10 }}><View selectable><Each of={p.value.text.split("\n").filter(line => line.trim())}>{line => <Text style={{ fontFamily: fonts.mono, fontSize: 11.5, lineHeight: 20.125, paddingHorizontal: 14, fontWeight: line().startsWith("@@") ? 700 : 400, color: line().startsWith("+") ? "#175c2a" : line().startsWith("-") ? "#8c2b1d" : line().startsWith("@@") ? colors.accent : "#7a7160", backgroundColor: line().startsWith("+") ? "rgba(31,138,59,0.12)" : line().startsWith("-") ? "rgba(210,68,48,0.10)" : "transparent" }}>{line()}</Text>}</Each><If when={!p.value.text.trim()}><Text style={{ padding: 24, textAlign: "center", color: colors.muted }}>本次改动未携带可展示的 patch 内容</Text></If></View></Scroll>
+  </View>;
+}

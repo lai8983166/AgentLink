@@ -15,5 +15,5 @@ import { colors } from "./ui";
 const icons = { back, close, send, stop, folder, bolt, house, network, audit, chevron, terminal, file };
 export function Icon(p: { name: keyof typeof icons; size?: number }) { return <Image src={icons[p.name]} style={{ width: p.size ?? 18, height: p.size ?? 18 }} />; }
 export function IconButton(p: { name: keyof typeof icons; label: string; onPress: () => void; disabled?: boolean; plain?: boolean }) {
-  return <View role="button" accessibilityLabel={p.label} disabled={p.disabled} onPress={p.onPress} style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: p.plain ? 0 : 1.5, borderColor: colors.ink, backgroundColor: p.plain ? "transparent" : colors.white, opacity: p.disabled ? 0.5 : 1, boxShadow: p.plain ? "none" : "2px 2px 0 #221c0e" }}><Icon name={p.name} /></View>;
+  return <View role="button" accessibilityLabel={p.label} disabled={p.disabled} onPress={p.onPress} style={{ width: p.plain ? 28 : 34, height: p.plain ? 30 : 34, marginLeft: p.plain ? -8 : 0, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: p.plain ? 0 : 1.5, borderColor: colors.ink, backgroundColor: p.plain ? "transparent" : colors.white, opacity: p.disabled ? 0.5 : 1, boxShadow: p.plain ? "none" : "2px 2px 0 #221c0e" }}><Icon name={p.name} /></View>;
 }
