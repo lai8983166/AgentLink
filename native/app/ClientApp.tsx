@@ -4,11 +4,12 @@ import { BackHandler } from "nsh/mobile";
 import { Client, canControl, decisions } from "../core/client";
 import type { HistoryItem } from "../../shared/src/domain";
 
-const colors = { ink: "#182d35", muted: "#637881", paper: "#f2f5f3", white: "#ffffff", accent: "#14695e", line: "#d7e1dc" };
+// Same visual tokens as web/src/theme.css; rendering remains native NSH.
+const colors = { ink: "#221c0e", muted: "#6f654f", paper: "#fdf9ef", white: "#ffffff", accent: "#3d5ce5", line: "#e7dcc0", gold: "#ffd700", surface: "#f8f1dd" };
 const labels: Record<string, string> = { running: "运行中", waiting_approval: "待审批", done: "已完成", idle: "空闲", error: "出错", unknown: "待核对", sending: "发送中", queued: "已排队", accepted: "已接收", failed: "失败", uncertain: "结果待确认", accept: "批准", acceptForSession: "本会话批准", decline: "拒绝", cancel: "取消", untrusted: "逐项询问", "on-request": "按需询问", never: "不询问" };
 
 export function ClientApp() {
-  const client = new Client({ call: (op, data) => host.call("client.call", { op, ...data }, { timeout: 120000 }) });
+  const client = new Client({ call: (op, data) => host.call("client.call", { op, ...data }, { timeout: op === "bootstrap" ? 10000 : 120000 }) });
   const state = signal(client.view);
   client.onChange = () => state.set(client.view);
   cleanup(() => client.dispose());
@@ -27,7 +28,7 @@ export function ClientApp() {
     if (state().screen !== "home") { client.home(); return true; }
     return false;
   });
-  void client.bootstrap();
+  void client.bootstrap(host.params.pairing);
 
   const edit = (key: "query" | "project" | "prompt" | "policy", value: string) => { client.view[key] = value; client.changed(); };
   const confirm = async (title: string, description: string, action: () => void) => {
@@ -51,14 +52,14 @@ export function ClientApp() {
   }
   function Home() {
     return <View style={{ flex: 1, gap: 12 }}>
-      <Row><Button small label="最近" onPress={() => client.home("recent")} /><Button small label="全部 Codex" onPress={() => client.home("codex")} /><Button small label="全部 Claude" onPress={() => client.home("claude")} /></Row>
+      <Row><If when={state().agent !== "recent"}><Button small label="‹ 最近会话" onPress={() => client.home("recent")} /></If><Button small label="全部 Codex 会话" onPress={() => client.home("codex")} /><Button small label="全部 Claude Code 会话" onPress={() => client.home("claude")} /></Row>
       <Input accessibilityLabel="搜索会话" placeholder="搜索标题或项目路径" value={state().query} onChange={({ value }) => edit("query", value)} style={inputStyle} />
-      <Row><Text style={{ color: colors.muted, fontSize: 13 }}>{state().agent === "recent" ? "最近 30 天" : "全部历史"} · {(state(), client.filtered().length)} 个会话</Text>
+      <Row><Text style={{ color: colors.muted, fontSize: 13 }}>{state().agent === "recent" ? "// 最近 30 天活跃" : "// 全部历史"} · {(state(), client.filtered().length)} 个会话</Text>
         <Button small label="新建任务" disabled={state().busy} onPress={() => { client.screen("new"); void client.browse(); }} /></Row>
       <List style={{ flex: 1 }} each={(state(), client.filtered().slice(0, state().limit))} keyExtractor={s => s.id} estimatedItemSize={124}
         onLoadMore={() => { client.view.limit += 50; client.changed(); }}
         empty={() => <Text style={{ padding: 24, color: colors.muted }}>没有匹配的会话。可以刷新或切换到全部目录。</Text>}>
-        {(item) => <View role="button" accessibilityLabel={item().title || "未命名会话"} onPress={() => open(item().id)} style={{ padding: 18, marginBottom: 10, backgroundColor: colors.white, borderRadius: 14, gap: 7 }}>
+        {(item) => <View role="button" accessibilityLabel={item().title || "未命名会话"} onPress={() => open(item().id)} style={{ padding: 16, marginBottom: 12, marginRight: 4, backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.ink, boxShadow: "3px 3px 0 #221c0e", borderRadius: 12, gap: 7 }}>
           <Row><Text style={{ fontSize: 12, color: colors.accent, fontWeight: "bold" }}>{item().agent.toUpperCase()}</Text><Text style={{ color: item().pendingApprovals ? "#a25315" : colors.muted, fontSize: 12 }}>{labels[item().status]}{item().pendingApprovals ? ` · ${item().pendingApprovals} 项审批` : ""}</Text></Row>
           <Text style={{ fontSize: 18, fontWeight: "bold", color: colors.ink }}>{item().title || "未命名会话"}</Text>
           <Text style={{ fontSize: 12, color: colors.muted }}>{item().cwd}</Text>
@@ -161,12 +162,15 @@ export function ClientApp() {
     </Scroll>;
   }
   return <View style={{ flex: 1, backgroundColor: colors.paper, paddingTop: insets().top, paddingBottom: insets().bottom, paddingHorizontal: 16, gap: 12 }}>
-    <Row><Button small label={state().screen === "home" ? "AgentLink" : "‹ 返回"} onPress={() => client.home()} />
-      <Text style={{ flex: 1, fontSize: 12, color: colors.muted }}>{state().pairing?.paired ? state().online ? state().ws === "open" ? "实时连接" : "已连接 · 正在恢复实时" : "离线 / 待核对" : "NSH Android"}</Text>
+    <Row><If when={state().screen !== "home"}><Button small label="‹ 返回" onPress={() => client.home()} /></If>
+      <View style={{ flex: 1, paddingVertical: 10, gap: 4 }}><Text style={{ fontWeight: "bold", fontSize: 19, color: colors.ink }}>{state().screen === "settings" ? "设置" : "AgentLink"}</Text>
+      <Text style={{ fontSize: 11, color: colors.muted }}>{state().pairing?.paired ? state().online ? state().ws === "open" ? "● 手机与后台 · 已连接" : "手机与后台 · 恢复实时连接中" : "手机与后台 · 离线 / 待核对" : "NSH Android"}</Text></View>
       <If when={state().pairing?.paired}><Button small label="刷新" disabled={state().busy} onPress={() => void client.refresh()} /><Button small label="设置" onPress={() => client.screen("settings")} /></If>
     </Row>
     <If when={!!state().notice}><View style={{ padding: 10, backgroundColor: "#fff0d4", borderRadius: 8 }}><Text style={{ color: "#7d4918", fontSize: 13 }}>{state().notice}</Text></View></If>
-    <If when={!state().pairing?.paired && !state().pairing?.pendingUnpair}><Pair /></If>
+    <If when={state().startup === "loading"}><Text style={{ padding: 24, color: colors.muted }}>正在恢复本机配对…</Text></If>
+    <If when={state().startup === "error"}><Card><Text style={{ color: colors.ink }}>无法恢复本机配对</Text><Text style={{ color: colors.muted }}>已保存的凭据不会被清除。请重试恢复，不需要重新输入 token。</Text><Button label="重试恢复配对" onPress={() => void client.bootstrap()} /></Card></If>
+    <If when={state().startup === "ready" && !state().pairing?.paired && !state().pairing?.pendingUnpair}><Pair /></If>
     <If when={state().pairing?.pendingUnpair || (state().pairing?.paired && state().screen === "settings")}><Settings /></If>
     <If when={state().pairing?.paired && state().screen === "home"}><Home /></If>
     <If when={state().pairing?.paired && state().screen === "session"}><Session /></If>
@@ -179,13 +183,13 @@ function Field(p: { label: string; value: string; onChange: (value: string) => v
   return <View style={{ gap: 7 }}><Text style={{ color: colors.muted, fontSize: 14 }}>{p.label}</Text><Input accessibilityLabel={p.label} value={p.value} onChange={({ value }) => p.onChange(value)} masked={p.masked} multiline={p.multiline} keyboardType={p.keyboard} placeholder={p.placeholder} autoCapitalize="none" autoCorrect={false} style={{ ...inputStyle, minHeight: p.multiline ? 120 : 48 }} /></View>;
 }
 function Button(p: { label: string; onPress: () => void; disabled?: boolean; small?: boolean }) {
-  return <View role="button" accessibilityLabel={p.label} disabled={p.disabled} onPress={p.onPress} style={{ paddingVertical: p.small ? 9 : 14, paddingHorizontal: 12, borderRadius: 9, backgroundColor: p.disabled ? "#94a7a0" : p.small ? "#e1ebe6" : colors.accent }}><Text style={{ fontSize: p.small ? 13 : 16, color: p.small ? colors.ink : "#ffffff", fontWeight: "bold" }}>{p.label}</Text></View>;
+  return <View role="button" accessibilityLabel={p.label} disabled={p.disabled} onPress={p.onPress} style={{ paddingVertical: p.small ? 9 : 14, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1.5, borderColor: colors.ink, boxShadow: p.disabled ? "none" : "2px 2px 0 #221c0e", backgroundColor: p.disabled ? colors.surface : p.small ? colors.white : colors.gold }}><Text style={{ fontSize: p.small ? 12 : 16, color: p.disabled ? colors.muted : colors.ink, fontWeight: "bold" }}>{p.label}</Text></View>;
 }
 function Row(p: { children?: JSX.Element }) { return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>{p.children}</View>; }
-function Card(p: { children?: JSX.Element }) { return <View style={{ backgroundColor: colors.white, padding: 14, borderRadius: 12, gap: 9 }}>{p.children}</View>; }
+function Card(p: { children?: JSX.Element }) { return <View style={{ backgroundColor: colors.white, padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: colors.ink, gap: 9 }}>{p.children}</View>; }
 function History(p: { item: HistoryItem; expanded: boolean; toggle: () => void }) {
   const text = () => p.item.type === "toolCall" ? p.item.outputTail ?? "" : p.item.type === "approval" ? `${p.item.command ?? "工具审批"}\n${labels[p.item.decision]}` : p.item.text;
-  return <View style={{ padding: 14, marginVertical: 5, borderRadius: 12, backgroundColor: p.item.type === "userMessage" ? "#dfebe5" : colors.white, gap: 8 }}>
+  return <View style={{ padding: 14, marginVertical: 5, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: p.item.type === "userMessage" ? "#fff0a8" : colors.white, gap: 8 }}>
     <Text style={{ color: colors.accent, fontSize: 12, fontWeight: "bold" }}>{p.item.type === "userMessage" ? "你" : p.item.type === "agentMessage" ? "AGENT" : p.item.type === "toolCall" ? "工具" : "审批记录"}</Text>
     <If when={p.item.type === "toolCall"}><Text style={{ fontSize: 14, color: colors.ink }}>{p.item.type === "toolCall" ? `${p.item.cmd || p.item.target}\n退出码 ${p.item.exitCode ?? "—"} · ${p.item.durationMs ?? 0} ms${p.item.diffStat ? ` · +${p.item.diffStat.added} −${p.item.diffStat.removed}` : ""}` : ""}</Text></If>
     <If when={p.item.type !== "toolCall" || p.expanded}><Markdown text={p.expanded ? text() : text().slice(0, 16000)} /></If>

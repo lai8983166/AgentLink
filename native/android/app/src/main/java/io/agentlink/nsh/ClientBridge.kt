@@ -41,6 +41,17 @@ class ClientBridge(private val activity: Activity, private val view: NshView) {
         return JSONObject().put("paired", c != null && !pending()).put("url", c?.url ?: "")
             .put("scope", scope()).put("pendingUnpair", pending()).put("version", BuildConfig.VERSION_NAME)
     }
+    private fun bootstrapInfo(): JSONObject {
+        val result = info()
+        val path = activity.intent?.getStringExtra("notificationPath")
+        if (path != null && activity.intent?.getStringExtra("pairingScope") == scope() && !pending() && NotificationPolicy.safePath(path)) result.put("navigation", path)
+        activity.intent?.removeExtra("notificationPath")
+        return result
+    }
+    /** Read local state before loading the UI; never include credentials in launch parameters. */
+    fun initialState(): JSONObject = try { bootstrapInfo() } catch (_: Exception) {
+        JSONObject().put("restoreError", true)
+    }
     private fun connection(data: JSONObject): Connection {
         check(!pending() && data.optString("scope") == scope()) { "配对已变更，请重新打开页面" }
         return requireNotNull(state.connection()) { "请先配对" }
@@ -77,13 +88,7 @@ class ClientBridge(private val activity: Activity, private val view: NshView) {
     }
     private fun execute(op: String, data: JSONObject): Any? {
         check(!closed)
-        if (op == "bootstrap") {
-            val result = info()
-            val path = activity.intent?.getStringExtra("notificationPath")
-            if (path != null && activity.intent?.getStringExtra("pairingScope") == scope() && !pending() && NotificationPolicy.safePath(path)) result.put("navigation", path)
-            activity.intent?.removeExtra("notificationPath")
-            return result
-        }
+        if (op == "bootstrap") return bootstrapInfo()
         if (op == "pair") {
             check(state.connection() == null && !pending()) { "请先解除原配对" }
             val url = NotificationPolicy.server(data.getString("url"))

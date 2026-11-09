@@ -61,6 +61,30 @@ describe("NSH shared wire contracts", () => {
 });
 
 describe("NSH client safe operations", () => {
+  test("native launch pairing is restored without waiting for a bootstrap host call or network", async () => {
+    const { port, client } = make();
+    const call = port.call.bind(port);
+    port.call = async (op, data) => { if (op === "bootstrap") throw new Error("must not require startup bridge roundtrip"); return call(op, data); };
+    port.reply = () => { throw new Error("offline"); };
+    await client.bootstrap({ paired: true, scope: "saved-scope", url: "https://agent.example.com" });
+    expect(client.view.startup).toBe("ready"); expect(client.view.pairing?.paired).toBe(true);
+    expect(port.calls.some(c => c.op === "pair")).toBe(false);
+  });
+  test("restore failure is distinct from unpaired and a read-only retry recovers", async () => {
+    const { port, client } = make();
+    await client.bootstrap({ restoreError: true });
+    expect(client.view.startup).toBe("error"); expect(client.view.pairing).toBeNull();
+    await client.bootstrap(); expect(client.view.startup).toBe("ready"); expect(client.view.pairing?.paired).toBe(true);
+    expect(port.calls.some(c => c.op === "pair" || c.op === "unpair")).toBe(false);
+  });
+  test("slow local restore stays loading rather than falsely displaying unpaired", async () => {
+    const { port, client } = make(); const call = port.call.bind(port);
+    let resolve!: (value: unknown) => void;
+    port.call = async (op, data) => op === "bootstrap" ? new Promise(r => { resolve = r; }) : call(op, data);
+    const restoring = client.bootstrap(); expect(client.view.startup).toBe("loading");
+    resolve({ paired: false, scope: "", url: "" }); await restoring;
+    expect(client.view.startup).toBe("ready"); expect(client.view.pairing?.paired).toBe(false);
+  });
   test("opening a normal session only reads and never resumes or forks", async () => {
     const { port, client } = make(); await client.bootstrap(); await client.open(summary.id);
     expect(port.writes).toEqual([]); expect(client.view.fresh).toBe(true);

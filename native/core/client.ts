@@ -6,6 +6,12 @@ import { WsClient, type FakeableSocket } from "../../web/src/api/ws";
 
 export interface Port { call(op: string, data?: Record<string, unknown>): Promise<any>; }
 export type Pairing = { paired: boolean; scope: string; url: string; pendingUnpair?: boolean; version?: string; navigation?: string };
+export function decodePairing(value: unknown): Pairing {
+  if (value && typeof value === "object" && "restoreError" in value) throw new Error("读取本机配对失败，请重试恢复；不会清除已保存凭据");
+  const p = value as Pairing | null;
+  if (!p || typeof p.paired !== "boolean" || typeof p.scope !== "string" || typeof p.url !== "string" || (p.paired && (!p.scope || !p.url))) throw new Error("配对恢复响应不完整，请重试恢复");
+  return p;
+}
 export type Outgoing = { id: string; text: string; state: "sending" | "queued" | "accepted" | "failed" | "uncertain" };
 type Box = { draft: string; messages: Outgoing[] };
 export type Screen = "home" | "session" | "settings" | "new";
@@ -33,7 +39,7 @@ export function decisions(values: unknown[]): string[] {
 }
 
 export class Client {
-  view = { pairing: null as Pairing | null, screen: "home" as Screen, sessions: [] as SessionSummary[],
+  view = { pairing: null as Pairing | null, startup: "loading" as "loading" | "ready" | "error", screen: "home" as Screen, sessions: [] as SessionSummary[],
     agent: "recent" as "recent" | "codex" | "claude", query: "", limit: 50, sessionId: "", detail: undefined as Detail | undefined,
     fresh: false, online: false, ws: "idle", busy: false, notice: "", status: null as any, notifications: null as any,
     fs: null as any, project: "", policy: "on-request", prompt: "", outbox: { draft: "", messages: [] } as Box };
@@ -51,6 +57,7 @@ export class Client {
   private active = true;
   private rechecking = false;
   private disposed = false;
+  private bootstrapping = false;
   constructor(private port: Port) {}
   changed() { if (!this.disposed) { this.view = { ...this.view }; this.onChange(); } }
   private async call(op: string, data: Record<string, unknown> = {}) {
@@ -59,9 +66,13 @@ export class Client {
     if (generation !== this.generation || this.disposed) throw new Error("配对已变更");
     return value;
   }
-  async bootstrap() {
+  async bootstrap(initial?: unknown) {
+    if (this.bootstrapping) return;
+    this.bootstrapping = true; this.view.startup = "loading"; this.changed();
     try {
-      this.view.pairing = await this.port.call("bootstrap");
+      this.view.pairing = decodePairing(initial === undefined ? await this.port.call("bootstrap") : initial);
+      this.view.startup = "ready";
+      this.changed(); // Local pairing is ready independently of slow/offline network requests.
       if (this.view.pairing?.paired) {
         try {
           const cached = JSON.parse(await this.call("storage.get", { key: "history" }) || "[]");
@@ -78,8 +89,8 @@ export class Client {
         this.connect(); await this.refresh();
         if (this.view.pairing.navigation) this.navigate(this.view.pairing.navigation);
       }
-    } catch (e) { this.error(e); }
-    this.changed();
+    } catch (e) { if (!this.view.pairing) this.view.startup = "error"; this.error(e); }
+    finally { this.bootstrapping = false; this.changed(); }
   }
   navigate(path: string) {
     if (path === "/settings") this.screen("settings");
@@ -88,7 +99,7 @@ export class Client {
     }
   }
   async pair(url: string, token: string) {
-    await this.perform(async () => { this.view.pairing = await this.port.call("pair", { url, token }); this.generation++; this.connect(); await this.refresh(); });
+    await this.perform(async () => { this.view.pairing = decodePairing(await this.port.call("pair", { url, token })); this.generation++; this.changed(); this.connect(); await this.refresh(); });
   }
   async unpair() {
     if (this.view.busy) return;

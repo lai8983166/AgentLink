@@ -18,8 +18,8 @@ class MainActivity : Activity() {
         view = NshView(this)
         view.setStorageDirectory(java.io.File(filesDir, "nsh"))
         check(view.setGrantedCapabilities("""{"host":["client.call","probe.ready","probe.echo","probe.save","probe.read"],"clipboard":true}"""))
-        view.setParams(mapOf("probe" to (BuildConfig.DEBUG && intent.getBooleanExtra("probe", false))))
         bridge = ClientBridge(this, view)
+        view.setParams(mapOf("probe" to (BuildConfig.DEBUG && intent.getBooleanExtra("probe", false)), "pairing" to bridge.initialState()))
         view.setErrorListener { showFailure() }
         view.handle("probe.ready") { _, reply -> reply.resolve(true) }
         view.handle("probe.echo") { data, reply ->

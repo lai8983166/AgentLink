@@ -16,3 +16,9 @@ test("pair, browse a session, send and inspect native notification settings", as
   await app.press("label:设置");
   await app.waitFor("text:人工通知状态");
 });
+
+test("cold launch restores a saved pairing from native launch parameters", async () => {
+  const app = await open("../App.tsx", { host: { params: { pairing: { paired: true, scope: "test-scope", url: "https://agent.example.com" } } } });
+  await app.waitFor("label:全部 Codex 会话");
+  expect(app.texts().includes("连接你的电脑")).toBe(false);
+});

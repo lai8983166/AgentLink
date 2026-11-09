@@ -10,9 +10,27 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import io.agentlink.mobile.AppState
+import io.agentlink.mobile.Connection
 
 @RunWith(AndroidJUnit4::class)
 class HostProbeTest {
+    @Test fun savedPairingIsReadByTheRealClientAfterActivityRecreation() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val state = AppState(context)
+        val connection = Connection("https://agent.example.com", "synthetic-pairing-token", "synthetic-device")
+        state.save(connection)
+        state.prefs.edit().putString("pairingScope", "synthetic-scope").remove("pendingUnpair").commit()
+        try {
+            ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java)).use { scenario ->
+                waitText(scenario, "全部 Codex 会话")
+                assertEquals(connection, AppState(context).connection())
+                scenario.recreate()
+                waitText(scenario, "全部 Codex 会话")
+                assertEquals(connection, AppState(context).connection())
+            }
+        } finally { state.clear(); state.prefs.edit().remove("pairingScope").commit() }
+    }
     private fun descendants(view: View): List<View> = listOf(view) +
         if (view is ViewGroup) (0 until view.childCount).flatMap { descendants(view.getChildAt(it)) } else emptyList()
 
