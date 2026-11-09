@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { root, lock, nsh, requireNsh, run, verify } from "./toolchain.mjs";
 
 const mode = process.argv[2] ?? "check";
@@ -14,6 +15,8 @@ if (mode === "test") {
 }
 if (!["check", "test"].includes(mode)) {
   run(nsh, ["build", "App.tsx", "--release", "--out", "android/app/src/main/assets/nsh"]);
+  // Retain executable JS/bytecode, but not development source mappings in an APK.
+  rmSync(join(root, "android/app/src/main/assets/nsh/bundle.js.map"), { force: true });
 }
 if (["apk", "release", "unit", "test-apk", "connected-test"].includes(mode)) {
   const task = mode === "release" ? ":app:assembleRelease" : mode === "unit" ? ":app:testDebugUnitTest" : mode === "apk" ? ":app:assembleDebug" : mode === "test-apk" ? ":app:assembleDebugAndroidTest" : ":app:connectedDebugAndroidTest";

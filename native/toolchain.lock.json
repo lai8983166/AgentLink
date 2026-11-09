@@ -2,14 +2,33 @@
   "nshVersion": "0.4.0",
   "release": "https://github.com/longbridge/nsh/releases/download/v0.4.0",
   "archives": {
-    "linux-x64": { "name": "nsh-linux-x86_64.tar.gz", "sha256": "8806121aebf40bb51f8fb6aa703722fbb01253f9a435759c18d53beece1ec976" },
-    "win32-x64": { "name": "nsh-windows-x86_64.zip", "sha256": "e4cc3893700a1fcceb974c73ef8e08bc94a47a7a85c96d797d49c16dde95dff3" },
-    "android": { "name": "nsh-embed-android.zip", "sha256": "ee67f5d9335ae48070c739679e8d82027dd1b1c6e040cfc6a5c0bbe06f26670e" }
+    "linux-x64": {
+      "name": "nsh-linux-x86_64.tar.gz",
+      "sha256": "8806121aebf40bb51f8fb6aa703722fbb01253f9a435759c18d53beece1ec976"
+    },
+    "win32-x64": {
+      "name": "nsh-windows-x86_64.zip",
+      "sha256": "e4cc3893700a1fcceb974c73ef8e08bc94a47a7a85c96d797d49c16dde95dff3"
+    },
+    "android": {
+      "name": "nsh-embed-android.zip",
+      "sha256": "ee67f5d9335ae48070c739679e8d82027dd1b1c6e040cfc6a5c0bbe06f26670e"
+    }
   },
   "aar": {
     "nsh.aar": "cbfcf4d60be7d1250aebd4771ce12609da1c5da7e9f9af4ac3f9379551e766df",
     "nsh-dev.aar": "98bea08a7a054fd3ab91ad58dc85cd2cbd36a1b85e918d501ceb35167a84d560"
   },
-  "android": { "minSdk": 28, "compileSdk": 36, "targetSdk": 36, "buildTools": "36.0.0", "jdk": 21, "gradle": "8.14.3", "agp": "8.13.0", "kotlin": "2.2.20", "ndk": null },
-  "note": "Prebuilt NSH AAR; an NDK or Rust compiler is not required for this TSX host. Source rebuilding requires a separate pinned toolchain."
+  "android": {
+    "minSdk": 28,
+    "compileSdk": 36,
+    "targetSdk": 36,
+    "buildTools": "36.0.0",
+    "jdk": 21,
+    "gradle": "8.14.3",
+    "agp": "8.13.0",
+    "kotlin": "2.2.20",
+    "ndk": "28.2.13676358"
+  },
+  "note": "Prebuilt NSH AAR; pinned NDK strips native symbols during APK packaging. Rust is not required. Source rebuilding requires a separate pinned toolchain."
 }
