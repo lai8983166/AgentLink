@@ -3,6 +3,7 @@ import { Input } from "nsh/base";
 import type { Client } from "../core/client";
 import { quotaLines, relativeTime, statusLabel } from "../core/presentation";
 import { colors, inputStyle, fonts } from "./ui";
+import { IconButton } from "./Icon";
 import refreshIcon from "../assets/refresh.svg";
 import settingsIcon from "../assets/settings.svg";
 
@@ -31,7 +32,7 @@ export function Home(p: { client: Client; state: () => Client["view"]; open: (id
   }
   return <View style={{ flex: 1, backgroundColor: colors.paper }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 16, backgroundColor: colors.white, borderBottomWidth: 1.5, borderColor: colors.ink }}>
-      <If when={state().agent !== "recent"}><View role="button" accessibilityLabel="‹ 返回" onPress={() => client.home("recent")}><Text style={{ fontSize: 22, color: colors.ink }}>‹</Text></View></If>
+      <If when={state().agent !== "recent"}><IconButton plain name="back" label="‹ 返回" onPress={() => client.home("recent")} /></If>
       <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><View style={{ width: 15, height: 15, borderRadius: 4, backgroundColor: colors.gold, borderWidth: 1.5, borderColor: colors.ink, boxShadow: "1.5px 1.5px 0 #221c0e" }} /><Text testID="home-brand" style={{ ...single, fontFamily: fonts.sans, fontSize: 16, fontWeight: 700, lineHeight: 21, letterSpacing: -0.16, color: colors.ink, flex: 1 }}>{state().agent === "recent" ? "AgentLink" : state().agent === "codex" ? "全部 Codex 会话" : "全部 Claude Code 会话"}</Text></View>
         <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: colors.ink, borderRadius: 99, paddingVertical: 3, paddingHorizontal: 10 }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: state().ws === "open" ? "#1f8a3b" : "#d24430" }} /><Text style={{ ...single, fontFamily: fonts.mono, fontSize: 10.5, lineHeight: 15, color: colors.muted }}>手机与后台 · {state().ws === "open" ? "已连接" : "连接中…"}{state().status?.connections ? ` · 桌面${state().status.connections.desktop === "ready" ? "已连接" : "待连接"}` : ""}</Text></View>
@@ -41,7 +42,7 @@ export function Home(p: { client: Client; state: () => Client["view"]; open: (id
       <View role="button" accessibilityLabel="设置" onPress={() => client.screen("settings")} style={iconButton}><Image src={settingsIcon} style={{ width: 18, height: 18 }} /></View>
     </View>
     <If when={state().agent === "recent"}><View style={{ flexDirection: "row", gap: 8, paddingVertical: 8, paddingHorizontal: 16 }}><Each of={[{ agent: "codex" as const, title: "全部 Codex 会话" }, { agent: "claude" as const, title: "全部 Claude Code 会话" }]}>{entry => <View role="button" accessibilityLabel={entry().title} onPress={() => client.home(entry().agent)} style={{ flex: 1, height: 42, alignItems: "center", justifyContent: "center", backgroundColor: colors.white, borderRadius: 12, borderWidth: 1.5, borderColor: colors.ink, boxShadow: "3px 3px 0 #221c0e" }}><Text style={{ ...single, fontFamily: fonts.sans, fontSize: 12, fontWeight: 700, color: colors.muted, textDecorationLine: "underline" }}>{entry().title} ›</Text></View>}</Each></View></If>
-    <If when={state().agent !== "recent"}><View style={{ paddingHorizontal: 16, paddingVertical: 8, gap: 5 }}><Input accessibilityLabel="搜索会话" placeholder="搜索标题或项目路径" value={state().query} onChange={({ value }) => { client.view.query = value; client.view.limit = 50; client.changed(); }} style={inputStyle} /><Text style={{ fontFamily: fonts.sans, fontSize: 11, color: colors.muted }}>不限制活跃时间 · {sessions().length} 个会话</Text></View></If>
+    <If when={state().agent !== "recent"}><View style={{ paddingHorizontal: 16, paddingVertical: 8, gap: 5 }}><Input accessibilityLabel="搜索会话" placeholder="搜索标题或项目路径" value={state().query} onChange={({ value }) => { client.view.query = value; client.view.limit = 50; client.changed(); }} style={{ ...inputStyle, paddingVertical: 9, paddingHorizontal: 12, borderWidth: 1, borderRadius: 10 }} /><Text style={{ fontFamily: fonts.sans, fontSize: 11, color: colors.muted }}>不限制活跃时间 · {sessions().length} 个会话</Text></View></If>
     <If when={state().refreshing || !!note()}><Text style={{ fontFamily: fonts.sans, fontSize: 12, lineHeight: 28, textAlign: "center", color: colors.muted, backgroundColor: colors.surface }}>{state().refreshing ? "刷新中…" : note()}</Text></If>
     <List style={{ flex: 1 }} contentStyle={{ paddingHorizontal: 16 }} each={sessions().slice(0, state().limit)} keyExtractor={s => s.id} estimatedItemSize={110} onRefresh={() => void pullRefresh()} refreshing={pulling()}
       ref={list => list.scrollToOffset({ offset: state().listOffset, animated: false })} onScroll={e => { client.view.listOffset = e.offset.y; }}
