@@ -74,6 +74,7 @@ export function ClientApp() {
     return <View style={{ flex: 1, gap: 8 }}>
       <Text style={{ fontSize: 19, fontWeight: "bold", color: colors.ink }}>{session()?.title || "读取会话…"}</Text>
       <Text style={{ fontSize: 12, color: colors.muted }}>{session()?.cwd}</Text>
+      <If when={!!session()?.forkedFromId}><Text style={{ fontSize: 12, color: colors.muted }}>接力来源：{session()?.forkedFromId}</Text></If>
       <Text style={{ fontSize: 13, color: colors.accent }}>{labels[session()?.status ?? "unknown"]} · {state().fresh ? "已联网核对" : "只读，等待核对"}</Text>
       <Scroll horizontal style={{ maxHeight: 48 }} contentStyle={{ flexDirection: "row", gap: 8 }}>
         <If when={session()?.agent === "codex"}>

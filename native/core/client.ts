@@ -66,6 +66,8 @@ export class Client {
         try {
           const cached = JSON.parse(await this.call("storage.get", { key: "history" }) || "[]");
           for (const raw of cached.slice(-8)) { const d = SessionDetailResponse.safeParse(raw); if (d.success) this.http.set(d.data.session.id, d.data); }
+          // Keep cached sessions discoverable when the first list request is offline.
+          this.view.sessions = [...this.http.values()].map(d => ({ ...d.session, status: "unknown", pendingApprovals: 0 }));
           const boxes = JSON.parse(await this.call("storage.get", { key: "outbox" }) || "{}");
           for (const [id, raw] of Object.entries(boxes)) {
             const b = raw as Box;
@@ -207,7 +209,7 @@ export class Client {
   screen(screen: Screen) { this.unlisten?.(); this.view.screen = screen; this.changed(); if (screen === "settings") void this.notifications("status"); }
   filtered() {
     const q = this.view.query.toLowerCase();
-    return this.view.sessions.filter(s => (this.view.agent !== "recent" || s.lastActivityAt >= Date.now() - 30 * 86400000) && `${s.title} ${s.cwd}`.toLowerCase().includes(q))
+    return this.view.sessions.filter(s => (this.view.agent === "recent" ? s.lastActivityAt >= Date.now() - 30 * 86400000 : s.agent === this.view.agent) && `${s.title} ${s.cwd}`.toLowerCase().includes(q))
       .sort((a, b) => ({ waiting_approval: 0, running: 1, done: 2, error: 3, idle: 4, unknown: 5 }[a.status] - { waiting_approval: 0, running: 1, done: 2, error: 3, idle: 4, unknown: 5 }[b.status]) || b.lastActivityAt - a.lastActivityAt);
   }
   async older() { await this.perform(async () => { const id = this.view.sessionId; this.display(id, await this.load(id, true)); }); }
@@ -215,12 +217,12 @@ export class Client {
   private saveBoxes() { return this.call("storage.set", { key: "outbox", value: JSON.stringify(this.boxes) }); }
   async send() {
     if (!canControl(this.view.detail, this.view.fresh) || !this.view.outbox.draft.trim()) return;
-    const id = this.view.sessionId, box = this.view.outbox, text = box.draft.trim();
+    const id = this.view.sessionId, box = this.view.outbox, originalDraft = box.draft, text = originalDraft.trim();
     await this.perform(async () => {
       const message: Outgoing = { id: await this.call("uuid"), text, state: "sending" };
       box.messages.push(message);
       try { await this.saveBoxes(); } catch (e) { message.state = "failed"; throw e; }
-      box.draft = "";
+      if (box.draft === originalDraft) box.draft = "";
       try {
         const result = await this.request(`/api/v1/sessions/${encodeURIComponent(id)}/message`, "POST", { text, clientMessageId: message.id });
         message.state = result.receipt ? MessageReceipt.parse(result.receipt).state : "accepted";

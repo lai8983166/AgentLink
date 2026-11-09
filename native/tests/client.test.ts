@@ -88,10 +88,22 @@ describe("NSH client safe operations", () => {
     const call = port.call.bind(port); port.call = async (op, data) => { if (op === "storage.set") throw new Error("full"); return call(op, data); };
     client.setDraft("测试"); await client.send(); expect(port.writes).toEqual([]);
   });
+  test("typing while message identity is saved does not erase the newer draft", async () => {
+    const { port, client } = make(); await client.bootstrap(); await client.open(summary.id);
+    const call = port.call.bind(port); let release!: () => void;
+    port.call = async (op, data) => {
+      if (op === "uuid") await new Promise<void>(r => { release = r; });
+      return call(op, data);
+    };
+    client.setDraft("第一条"); const sending = client.send(); client.setDraft("新的草稿"); release(); await sending;
+    expect(client.view.outbox.draft).toBe("新的草稿");
+    expect(JSON.parse(port.writes[0].body).text).toBe("第一条");
+  });
   test("offline cached history disables controls", async () => {
     const { port, client } = make(); port.stored.history = JSON.stringify([detail]);
     port.reply = () => { throw new Error("offline"); };
     await client.bootstrap(); await client.open(summary.id); client.setDraft("不可发送"); await client.send();
+    expect(client.view.sessions.map(s => s.id)).toContain(summary.id);
     expect(client.view.detail?.session.history.length).toBe(1); expect(client.view.fresh).toBe(false); expect(port.writes).toEqual([]);
   });
   test("invalid patch triggers a fresh read without a write", async () => {
