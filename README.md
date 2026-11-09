@@ -5,7 +5,7 @@
 - `daemon/` — PC 侧常驻进程（Bun + Hono + TS），桥接 Codex 与 Claude Code 原终端
 - `web/` — 手机端 PWA（React + Vite）
 - `mobile/` — 自用安卓 APK（复用 React 界面，Kotlin 后台通知，无 Google 服务依赖）
-- `native/` — NSH 安卓客户端（开发中，当前为独立宿主验证版；见 [构建与验证说明](native/README.md)）
+- `native/` — NSH 安卓客户端（核心功能试用版，复用后台、独立 APK；真机验收待完成；见 [构建与验证说明](native/README.md)）
 - `shared/` — API 契约包（REST/WS/事件 zod schema，两端共用）
 - `plugins/` — Claude Code 原终端插件及本地安装工具
 - `design/` — UI 原型、设计笔记、codex 协议摸底实录

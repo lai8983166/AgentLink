@@ -1,42 +1,63 @@
 # AgentLink NSH Android
 
-这是同仓库第二套安卓客户端的**阶段零宿主验证版**，尚未接入 AgentLink 后台。现有 web/ 与 mobile/ 保持独立可用。
+同仓库第二套安卓客户端，复用现有 AgentLink 后台。支持 HTTPS 配对、最近/全部 Codex 与 Claude 目录、搜索、历史流与翻页、草稿与回执、发送/中断、显式恢复/接管/fork、动态审批、项目目录与新建 Codex 任务，以及原生任务通知。审计和额度面板暂缓，详见 [功能对照](COMPATIBILITY.md)。
 
-当前页面验证 NSH 原生输入、宿主双向消息和 Android Keystore 加密读写，只输入人工测试文字。不是可遥控会话的正式客户端。安装不要求 USB：可以把 APK 传到手机手动安装；ADB（USB 或无线）只用于自动安装和仪器测试。
+当前为 **0.1.0 手机试用版**：构建和自动测试通过不代表真机验收通过。[验证记录](VALIDATION.md) 明确列出未验证项。可以直接将 APK 传到手机安装，**无需 USB**。
 
-## 构建
+## 安装和使用
 
-需要 Node 22+、JDK 21、Android SDK 36 / build-tools 36.0.0，以及 Windows x64 或 Linux x64。设置 JAVA_HOME 和 ANDROID_HOME 指向本地工具链。Linux 还需 curl、tar、python3；Windows 需 curl.exe、tar、PowerShell。使用预编译 NSH AAR 时无需安装 Rust/NDK；本阶段 debug 包保留原生符号，包体不代表最终发布大小。
+1. 将 native/release/AgentLink-NSH.apk 传到 Android 9 或更高版本的手机，允许文件来源安装应用。支持 arm64-v8a 和 x86_64，不支持仅 32 位的设备。
+2. 打开“AgentLink NSH”，填入与原客户端相同的 HTTPS 根地址和配对 token，例如 https://agent.example.com。必须使用有效证书，不接受 HTTP 或带路径的地址。
+3. 打开会话只浏览；需要控制时显式选择接管/继续。发送结果待确认时使用“核对发送结果”，不要把相同指令作为新消息再次发送。
+4. 在“设置”开启任务通知，允许系统通知权限，并按手机系统允许后台运行。首次权限授权后可能需要再点一次开启。
 
-在仓库根目录执行：
+release 包名为 io.agentlink.nsh，debug 为 io.agentlink.nsh.debug，与原 io.agentlink.mobile 独立并装。配对、设备 UUID、草稿、缓存、通知与解除配对均各自独立，不迁移原 APK 数据。同一 NSH 包覆盖升级需要相同签名。回退可在设置里解除 NSH 配对后卸载，继续使用原客户端。
+
+通知复用原生长轮询服务，不依赖 Google 服务。强制停止、系统省电、断网可能中断通知；重启手机后需先打开应用。解除配对先停本机服务，远程注销失败时保留加密凭据用于重试，并明确显示待注销状态。
+
+## 构建和检查
+
+需要 Node 22+、Bun 1.4.0、pnpm 10.4.0、JDK 21、Android SDK 36 / build-tools 36.0.0，以及 Windows x64 或 Linux x64。设置 JAVA_HOME、ANDROID_HOME。Linux 需 curl、tar、python3；Windows 需 curl.exe、tar、PowerShell。先在根目录安装工作区依赖。
 
 ```bash
+pnpm install --frozen-lockfile
 node native/scripts/setup.mjs
 node native/scripts/build.mjs test
+node native/scripts/build.mjs unit
 node native/scripts/build.mjs apk
 node native/scripts/build.mjs test-apk
 ```
 
-setup 下载 toolchain.lock.json 中固定的 NSH 0.4.0 CLI 和 Android 库，验证归档及 AAR SHA-256 后安装到被忽略的 .tools/。可用 NSH_ARCHIVE_DIR 指向已下载的官方归档目录，文件名需与 lock 一致，仍会校验。缓存下载不完整时只需删除对应 .tools/downloads 文件后重试。
+test 包含类型检查、工具链完整性、客户端核心契约/状态与 NSH 无界面交互测试；unit 为 Kotlin JVM 测试。普通 pnpm check 保持无需 Android SDK。独立 CI 在 native/shared/共享 Kotlin/共享状态代码变化时检查两套客户端。
 
-debug 产物为 android/app/build/outputs/apk/debug/app-debug.apk，包名 io.agentlink.nsh.debug，可与现有客户端并装。release 发布尚未配置，不能用本验证包代替正式发布。Linux 构建已验证；Windows 入口尚未实测。
+setup 下载 toolchain.lock.json 固定的 NSH 0.4.0 CLI/AAR，并校验 SHA-256。可用 NSH_ARCHIVE_DIR 指向官方归档目录。使用预编译 AAR 无需 Rust/NDK；未安装 NDK 时原生符号保留，当前 APK 包体较大，不能据此推断运行内存或性能。Linux 构建已验证；Windows 构建入口尚未实测。
 
-## 验证
+debug 输出 android/app/build/outputs/apk/debug/app-debug.apk。release 需要外部签名配置，缺失时明确失败：
 
-```bash
-# 连接一个已授权的模拟器或 USB/无线设备后运行
-node native/scripts/build.mjs connected-test
+```properties
+# 保存在仓库外；storeFile 指向外部绝对路径
+storeFile=/private/signing/agentlink.jks
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=YOUR_KEY_ALIAS
+keyPassword=YOUR_KEY_PASSWORD
 ```
 
-仪器测试仅操作 NSH debug 包及人工文字，验证宿主通信、加密落盘和 Activity 重建。无界面测试中的 host.mjs 是内存假宿主，不证明 Android Keystore 或真机输入法正常。实际结果见 VALIDATION.md。
+```bash
+export AGENTLINK_SIGNING_PROPERTIES=/private/signing/keystore.properties
+node native/scripts/release.mjs
+```
 
-手工安装后：输入人工文字，依次点击“验证双向通信”“加密保存测试文字”；关闭并重新打开应用，点击“读取测试文字”。另检查中文输入法组合输入、键盘遮挡、返回键、字体缩放及旋转。不要将真实 token、会话正文或本机地址填入此测试页。
+生成 native/release/AgentLink-NSH.apk 和 .apk.sha256，不覆盖旧 mobile/release/AgentLink.apk。本地也可用忽略的 native/android/keystore.properties 保存配置；密钥必须在仓库外。使用现有私有签名配置不改变独立包名/存储。
 
-## 维护边界
+## 设备验收
 
-- App.tsx/app/ 是 NSH 界面；android/ 是独立 Kotlin 宿主；scripts/ 负责固定版本构建。
-- NSH CLI、AAR 与 bundle 必须匹配。构建校验本地 AAR，Gradle 在缺少 bundle 时拒绝构建。
-- 原始日志、截图、APK、下载库和本地 SDK 配置不提交；VALIDATION.md 仅记去身份化结论。
-- 后续会话核心、通知及发布工作按 openspec/changes/add-nsh-android-client/tasks.md 推进；阶段零未验收前不把客户端视为可用。
+连接可用模拟器或已授权的 USB/无线设备后可执行 node native/scripts/build.mjs connected-test。仪器测试使用 debug 专属 probe 页面，验证宿主事件、Keystore 保存/读取和 Activity 重建。无界面测试的假宿主不证明原生输入法和 Keystore 正常。
 
-NSH 依赖来源：[官方仓库](https://github.com/longbridge/nsh)、[Android 嵌入文档](https://nsh.dev/docs/android/)，许可 Apache-2.0。发布前需随产物保留依赖许可与所需声明。
+手机手测清单见 [VALIDATION.md](VALIDATION.md)，不要求自动化或 USB。通知、中文输入、长历史与并装隔离仍需设备确认。不要把真实 token、会话正文、截图或原始日志提交到仓库。
+
+## 维护
+
+- app/ 是 NSH 界面，core/ 管理状态和回执，android/ 提供网络、Keystore 与系统能力，scripts/ 固定构建版本。
+- 共用 shared Zod 契约、纯历史 reducer、web 的纯会话状态/WS 管理器，以及 mobile/android/native-core。无 DOM、React 或网页嵌入依赖。网络走 Kotlin OkHttp，token 不传入 TS 状态。
+- 改协议或共享逻辑时同步运行两侧测试并更新功能对照。每个验证完成的小部分提交前运行隐私扫描。APK、密钥、SDK 路径和运行日志不入库。
+- NSH 依赖来源：[官方仓库](https://github.com/longbridge/nsh)，许可 Apache-2.0。发布时保留依赖声明。
