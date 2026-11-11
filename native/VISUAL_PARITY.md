@@ -1,5 +1,7 @@
 # NSH 逐页对照清单
 
+2026-11-11：两版同步采用朋克拼贴主题（原版 0.2.3 / NSH 0.1.6），下表的页面覆盖和操作对照继续适用，旧配色/圆角保留为 classic 构建主题。新主题共享配置、复验方式和恢复说明见 [双客户端视觉主题](../design/ui-themes.md)。本轮 NSH 新主题截取 16 个页面/状态（含已发送消息），旧主题隔离预览 15 个状态通过；原版另进行页面预览和移动端 E2E。真机检查仍单列。
+
 基准为同仓库 `web/src/theme.css`、`web/src/pages` 与 `web/src/components`，不只依赖用户指出的位置。2026-11-09 使用同一组人工数据，在 390 × 844 浏览器视口检查原版与 NSH 预览；手机系统栏、中文字体回退与输入法仍需 APK 验收。
 
 | 页面/状态 | 本轮核对与修正 | 验证方式 |
@@ -27,7 +29,7 @@ node native/scripts/build.mjs test
 node native/scripts/visual-review.mjs /path/to/browser
 ```
 
-第二条可省略浏览器参数，让 NSH 使用可用浏览器。无图形加速的 Linux 环境可传入自行配置软件渲染的 Chromium 启动脚本。截图写入被忽略的 `native/.tools/visual-review/workspace/native/artifacts/`，不改生产清单，不连接真实后台。当前自动截取 15 个页面/状态；截图生成成功仍需人工查看，不能代替视觉判断。
+第二条可省略浏览器参数，让 NSH 使用可用浏览器。无图形加速的 Linux 环境可传入自行配置软件渲染的 Chromium 启动脚本。截图写入被忽略的 `native/.tools/visual-review/workspace/native/artifacts/`，不改生产清单，不连接真实后台。当前自动截取 16 个页面/状态；截图生成成功仍需人工查看，不能代替视觉判断。追加 `--classic` 在隔离副本检查保留主题，输出到相邻 classic 目录。
 
 ## 明确保留的差异和未验证项
 

@@ -1,7 +1,7 @@
 {
   "name": "AgentLink NSH",
   "id": "io.agentlink.nsh",
-  "version": "0.1.5",
-  "build": 7,
+  "version": "0.1.6",
+  "build": 8,
   "capabilities": { "host": ["client.call", "probe.ready", "probe.echo", "probe.save", "probe.read"], "clipboard": true }
 }

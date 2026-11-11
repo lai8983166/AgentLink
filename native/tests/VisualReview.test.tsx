@@ -12,6 +12,7 @@ test("synthetic page screenshots", async () => {
  await app.press("label:人工观察任务"); await app.waitFor("label:接管此会话"); await app.screenshot("artifacts/observe.png"); await app.press("label:‹ 返回");
  await app.press("label:人工终端任务"); await app.waitFor("text:/Claude 终端未连接/"); await app.screenshot("artifacts/claude.png"); await app.press("label:‹ 返回");
  await app.press("label:人工示例任务"); await app.waitFor("text:人工构造的回复"); await app.screenshot("artifacts/session.png");
+ await app.type("label:消息输入", "人工拼贴消息"); await app.press("label:发送消息"); await app.waitFor("text:人工拼贴消息"); await app.screenshot("artifacts/sent-message.png");
  await app.press("label:展开工具输出"); await app.screenshot("artifacts/tool-expanded.png");
  await app.press("label:查看文件差异"); await app.waitFor("text:改动预览"); await app.screenshot("artifacts/diff.png"); await app.press("label:关闭差异");
  await app.press("label:‹ 返回"); await app.press("label:设置"); await app.waitFor("text:家里 PC"); await app.screenshot("artifacts/settings.png");

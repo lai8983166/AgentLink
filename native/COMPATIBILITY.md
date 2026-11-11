@@ -20,6 +20,7 @@
 | 审计/额度 | 同后台数据与失效语义 | 已实现审计游标分页、额度来源/过期/失败提示，共用额度合并逻辑 |
 | 导航/布局 | 按原版信息架构 | 配对卡片、首页分组/目录搜索、会话条件控制与流内审批、底部新任务弹层、设置分区；返回保留目录查询 |
 | 更新 | 下载同签名升级包 | NSH 使用 APK 下载，不提供 PWA 缓存更新与浏览器键盘诊断 |
+| 视觉主题 | 两版共用构建选择，应用内无切换 | 默认朋克拼贴；classic 样式保留，功能逻辑共享，见 design/ui-themes.md |
 
 人工场景：native/tests/fixtures.ts 和 client.test.ts 使用 shared Zod 解析；NSH client-host.mjs 驱动配对、目录、消息与设置交互；旧侧 web 的 WS、session-state、history-reader、message-outbox 单元测试和 e2e 覆盖相同协议语义。所有样例为合成数据。新增枚举或字段时同步这些测试，不把未知能力推断为可写。
 

@@ -2,6 +2,8 @@
 
 当前仓库的增量客户端：React 界面内置在 APK，Capacitor 连接 Kotlin 插件；通知由 Kotlin 前台服务接收，不依赖 Google Play 服务、FCM 或网页 Service Worker。浏览器版本继续保留。
 
+0.2.3 与 NSH 0.1.6 同步采用朋克拼贴主题，覆盖各页面及弹层。旧样式通过构建配置保留，应用内无切换按钮；详见 [双客户端视觉主题](../design/ui-themes.md)。使用原签名覆盖安装，无需重新建立身份。
+
 ## 使用
 
 1. 电脑运行包含安卓通知接口的新版 daemon。下载同一 HTTPS 入口的 `/downloads/agentlink.apk`，允许下载来源安装未知应用。
