@@ -1,3 +1,4 @@
+import { themedStyle } from "../../../shared/src/ui-theme";
 import { useState } from "react";
 import type { HistoryItem } from "@agentlink/shared";
 import { DiffView } from "./DiffView";
@@ -9,37 +10,37 @@ export function ToolCard({ item }: { item: Extract<HistoryItem, { type: "toolCal
   const isFile = item.kind === "fileChange";
   const meta =
     isFile && item.diffStat ? (
-      <span style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700 }}>
-        <span style={{ color: "var(--green)" }}>+{item.diffStat.added}</span>{" "}
-        <span style={{ color: "var(--red)" }}>−{item.diffStat.removed}</span>
+      <span style={themedStyle({ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700 })}>
+        <span style={themedStyle({ color: "var(--green)" })}>+{item.diffStat.added}</span>{" "}
+        <span style={themedStyle({ color: "var(--red)" })}>−{item.diffStat.removed}</span>
       </span>
     ) : item.exitCode != null ? (
-      <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: item.exitCode === 0 ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
+      <span style={themedStyle({ fontFamily: "var(--mono)", fontSize: 11, color: item.exitCode === 0 ? "var(--green)" : "var(--red)", fontWeight: 700 })}>
         {item.exitCode === 0 ? "✓" : "✕"} exit {item.exitCode}
         {item.durationMs != null ? ` · ${(item.durationMs / 1000).toFixed(1)}s` : ""}
       </span>
     ) : (
-      <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-faint)" }}>执行中…</span>
+      <span style={themedStyle({ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-faint)" })}>执行中…</span>
     );
 
   return (
     <div
-      style={{
+      style={themedStyle({
         margin: "10px 0 0",
         border: "1.5px solid var(--border)",
         borderRadius: 12,
         background: "var(--surface)",
         boxShadow: "2px 2px 0 rgba(34,28,14,.85)",
         overflow: "hidden",
-      }}
+      })}
     >
       <div
         onClick={() => (isFile ? setDiffOpen(true) : setOpen(!open))}
-        style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 12px", cursor: "pointer", fontSize: 13 }}
+        style={themedStyle({ display: "flex", alignItems: "center", gap: 9, padding: "10px 12px", cursor: "pointer", fontSize: 13 })}
       >
-        <span style={{ width: 20, textAlign: "center" }}>{isFile ? "✏️" : "🖥"}</span>
+        <span style={themedStyle({ width: 20, textAlign: "center" })}>{isFile ? "✏️" : "🖥"}</span>
         <span
-          style={{
+          style={themedStyle({
             fontFamily: "var(--mono)",
             fontSize: 12,
             flex: 1,
@@ -47,17 +48,17 @@ export function ToolCard({ item }: { item: Extract<HistoryItem, { type: "toolCal
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-          }}
+          })}
         >
           {isFile ? item.target : (item.cmd ?? item.target)}
         </span>
         {meta}
-        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-dim)" }}>{isFile ? "▶" : open ? "▼" : "▶"}</span>
+        <span style={themedStyle({ fontSize: 10, fontWeight: 700, color: "var(--text-dim)" })}>{isFile ? "▶" : open ? "▼" : "▶"}</span>
       </div>
       {open && item.outputTail && !isFile && (
-        <div style={{ padding: "0 12px 10px" }}>
+        <div style={themedStyle({ padding: "0 12px 10px" })}>
           <pre
-            style={{
+            style={themedStyle({
               fontFamily: "var(--mono)",
               fontSize: 11,
               lineHeight: 1.6,
@@ -70,7 +71,7 @@ export function ToolCard({ item }: { item: Extract<HistoryItem, { type: "toolCal
               whiteSpace: "pre-wrap",
               wordBreak: "break-all",
               maxHeight: 260,
-            }}
+            })}
           >
             {item.outputTail}
           </pre>

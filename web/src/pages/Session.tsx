@@ -1,3 +1,4 @@
+import { themedStyle } from "../../../shared/src/ui-theme";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -286,7 +287,7 @@ function SessionView() {
   const approvalList = [...approvals.entries()];
 
   return (
-    <div className={`session-page${inputAtTop || inputFallback ? " composer-at-top" : ""}`} data-input-layout={inputAtTop ? "manual-top" : inputFallback ? "auto-top" : "bottom"} style={viewportStyle}>
+    <div className={`session-page${inputAtTop || inputFallback ? " composer-at-top" : ""}`} data-input-layout={inputAtTop ? "manual-top" : inputFallback ? "auto-top" : "bottom"} style={themedStyle(viewportStyle)}>
       <div className="session-header">
       <div className="topbar">
         <Link to={listBackTo} className="back">
@@ -296,8 +297,8 @@ function SessionView() {
           <div className="name">
             <span className={`dot ${status === "waiting_approval" ? "waiting" : status}`} />
             <i className="hash">#</i>
-            <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session?.title ?? "会话"}</span>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", border: "1px solid rgba(34,28,14,.55)", padding: "1px 6px", borderRadius: 6 }}>{isClaude ? "CLAUDE" : "CODEX"}</span>
+            <span style={themedStyle({ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{session?.title ?? "会话"}</span>
+            <span style={themedStyle({ fontFamily: "var(--mono)", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", border: "1px solid rgba(34,28,14,.55)", padding: "1px 6px", borderRadius: 6 })}>{isClaude ? "CLAUDE" : "CODEX"}</span>
           </div>
           <div className="sub">{session?.cwd}</div>
         </div>
@@ -315,18 +316,18 @@ function SessionView() {
 
       <UpdateNotice />
       {busyError && (
-        <div style={{ background: "var(--red-bg)", borderBottom: "1.5px solid var(--border)", padding: "10px 16px", fontSize: 12.5, color: "var(--red)", display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={themedStyle({ background: "var(--red-bg)", borderBottom: "1.5px solid var(--border)", padding: "10px 16px", fontSize: 12.5, color: "var(--red)", display: "flex", gap: 8, alignItems: "center" })}>
           <span>⏳</span>
-          <span style={{ flex: 1 }}>{busyError}</span>
-          <Link to="/" style={{ color: "var(--red)", fontWeight: 700, textDecoration: "underline dotted" }}>返回列表</Link>
+          <span style={themedStyle({ flex: 1 })}>{busyError}</span>
+          <Link to="/" style={themedStyle({ color: "var(--red)", fontWeight: 700, textDecoration: "underline dotted" })}>返回列表</Link>
         </div>
       )}
 
       {errorBanner && (
-        <div style={{ background: "var(--red-bg)", borderBottom: "1.5px solid var(--border)", padding: "10px 16px", fontSize: 12.5, color: "var(--red)", display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={themedStyle({ background: "var(--red-bg)", borderBottom: "1.5px solid var(--border)", padding: "10px 16px", fontSize: 12.5, color: "var(--red)", display: "flex", gap: 8, alignItems: "center" })}>
           <span>⚠️</span>
-          <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 11.5, wordBreak: "break-all" }}>{errorBanner}</span>
-          <span style={{ cursor: "pointer", fontWeight: 700 }} onClick={() => setErrorBanner(null)}>✕</span>
+          <span style={themedStyle({ flex: 1, fontFamily: "var(--mono)", fontSize: 11.5, wordBreak: "break-all" })}>{errorBanner}</span>
+          <span style={themedStyle({ cursor: "pointer", fontWeight: 700 })} onClick={() => setErrorBanner(null)}>✕</span>
         </div>
       )}
 
@@ -363,26 +364,26 @@ function SessionView() {
           navigate(`/${newId}`);
         }}
       />}
-      {isClaude && <div role="status" style={{ padding: "9px 16px", borderBottom: "1px solid var(--border)", fontSize: 12, background: session?.terminal?.inputBlocked ? "var(--gold)" : "var(--surface)" }}>
+      {isClaude && <div role="status" style={themedStyle({ padding: "9px 16px", borderBottom: "1px solid var(--border)", fontSize: 12, background: session?.terminal?.inputBlocked ? "var(--gold)" : "var(--surface)" })}>
         {session?.terminal?.connected ? "Claude 原终端会话 · 手机和电脑共用同一会话" : "Claude 终端未连接，请保持电脑终端运行并加载 AgentLink 插件"}
-        <div style={{ marginTop: 4, color: "var(--text-dim)" }}>{session?.terminal?.reason ?? "权限沿用电脑终端；关闭手机不会停止任务"}</div>
-        {session?.terminal?.permissionMode && <div style={{ marginTop: 4 }}>终端权限：{CLAUDE_MODE[session.terminal.permissionMode] ?? "沿用终端设置"}</div>}
+        <div style={themedStyle({ marginTop: 4, color: "var(--text-dim)" })}>{session?.terminal?.reason ?? "权限沿用电脑终端；关闭手机不会停止任务"}</div>
+        {session?.terminal?.permissionMode && <div style={themedStyle({ marginTop: 4 })}>终端权限：{CLAUDE_MODE[session.terminal.permissionMode] ?? "沿用终端设置"}</div>}
       </div>}
 
       {/* 动作条：当前动作常显 */}
-      <div style={{ padding: "4px 16px", fontSize: 11, color: "var(--text-dim)" }}>
+      <div style={themedStyle({ padding: "4px 16px", fontSize: 11, color: "var(--text-dim)" })}>
         {wsConnected ? "手机与后台已连接" : "实时连接中 · 定时核对输出"}
         {detailQ.data?.historyPage?.cached && " · 本地缓存，正在核对最新内容"}
         {session?.desktopManaged && ` · ${session.desktopGone ? "电脑端未连接" : status === "unknown" ? "会话状态待确认" : takenOver ? "原会话可控制" : "原会话观察中"}`}
         {detailQ.dataUpdatedAt ? ` · 内容核对于 ${new Date(detailQ.dataUpdatedAt).toLocaleTimeString()}` : ""}
-        <button className="btn ghost" style={{ marginLeft: 8, padding: "3px 7px", fontSize: 11 }}
+        <button className="btn ghost" style={themedStyle({ marginLeft: 8, padding: "3px 7px", fontSize: 11 })}
           disabled={detailQ.isFetching} onClick={() => void detailQ.refetch()}>刷新输出</button>
       </div>
-      {detailQ.isError && <div role="status" style={{ padding: "6px 16px", fontSize: 12, color: "var(--red)" }}>
+      {detailQ.isError && <div role="status" style={themedStyle({ padding: "6px 16px", fontSize: 12, color: "var(--red)" })}>
         输出同步失败，正在重试；当前显示上次收到的内容。可点击“刷新输出”重新核对。
       </div>}
       <div
-        style={{
+        style={themedStyle({
           display: "flex",
           alignItems: "center",
           gap: 8,
@@ -393,23 +394,23 @@ function SessionView() {
           background: status === "waiting_approval" ? "var(--gold)" : "var(--surface)",
           color: "var(--text)",
           flexShrink: 0,
-        }}
+        })}
       >
         <span className={`dot ${status === "waiting_approval" ? "waiting" : status}`} />
         <span>{status === "waiting_approval" ? "等待批准" : STATUS_LABEL[status]}</span>
         {activity && <span className="mono-cmd">{activity}</span>}
-        {queue > 0 && <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" }}>· {queue} 条排队</span>}
+        {queue > 0 && <span style={themedStyle({ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" })}>· {queue} 条排队</span>}
       </div>
 
       </div>
       {/* 对话流 */}
       <div className="conversation-area">
       <div className="content session-content" data-testid="conversation-history" ref={scrollRef} onScroll={onScroll}>
-        {detailQ.data?.historyPage?.hasMore && <div style={{ textAlign: "center", padding: "10px 0" }}>
+        {detailQ.data?.historyPage?.hasMore && <div style={themedStyle({ textAlign: "center", padding: "10px 0" })}>
           <button className="btn ghost" disabled={loadingOlder || detailQ.isFetching || detailQ.data.historyPage.cached} onClick={() => void loadOlder()}>
             {loadingOlder ? "加载中…" : "加载更早记录"}
           </button>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>已加载 {session?.history.length} / {detailQ.data.historyPage.total} 条记录</div>
+          <div style={themedStyle({ fontSize: 11, color: "var(--text-dim)", marginTop: 4 })}>已加载 {session?.history.length} / {detailQ.data.historyPage.total} 条记录</div>
         </div>}
         {olderError && <div role="status">{olderError}</div>}
         <OlderDeliveries messages={archived} onDismiss={forgetAccepted} />
@@ -420,7 +421,7 @@ function SessionView() {
                 key={h.id}
                 data-message-id={h.id}
                 data-message-type="user"
-                style={{
+                style={themedStyle({
                   alignSelf: "flex-end",
                   maxWidth: "82%",
                   background: "var(--gold)",
@@ -435,10 +436,10 @@ function SessionView() {
                   width: "fit-content",
                   marginLeft: "auto",
                   display: "block",
-                }}
+                })}
               >
                 {h.text}
-                {h.deliveryState && <div style={{ fontSize: 10.5, opacity: 0.75, marginTop: 4 }}>
+                {h.deliveryState && <div style={themedStyle({ fontSize: 10.5, opacity: 0.75, marginTop: 4 })}>
                   {{ sending: "发送中", queued: "已排队 · 等待终端开始执行", accepted: "电脑端已接收 · 等待同步", failed: "发送失败 · 草稿已保留", uncertain: "接收结果待确认" }[h.deliveryState]}
                 </div>}
               </div>
@@ -446,7 +447,7 @@ function SessionView() {
           }
           if (h.type === "agentMessage") {
             return (
-              <div key={h.id} data-message-id={h.id} data-message-type="agent" style={{ fontSize: 14, lineHeight: 1.75, margin: "14px 2px 0" }}>
+              <div key={h.id} data-message-id={h.id} data-message-type="agent" style={themedStyle({ fontSize: 14, lineHeight: 1.75, margin: "14px 2px 0" })}>
                 <MarkdownLite text={h.text} />
               </div>
             );
@@ -457,9 +458,9 @@ function SessionView() {
 
         {/* 流式缓冲 */}
         {delta && (
-          <div style={{ fontSize: 14, lineHeight: 1.75, margin: "14px 2px 0" }}>
+          <div style={themedStyle({ fontSize: 14, lineHeight: 1.75, margin: "14px 2px 0" })}>
             <MarkdownLite text={delta.text} />
-            <span style={{ display: "inline-block", width: 8, height: 15, background: "var(--gold-deep)", border: "1px solid var(--border)", verticalAlign: -2, marginLeft: 3, animation: "pulse 1s infinite" }} />
+            <span style={themedStyle({ display: "inline-block", width: 8, height: 15, background: "var(--gold-deep)", border: "1px solid var(--border)", verticalAlign: -2, marginLeft: 3, animation: "pulse 1s infinite" })} />
           </div>
         )}
 
@@ -491,7 +492,7 @@ function SessionView() {
             setFollow(true);
             if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
           }}
-          style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", background: "var(--border)", color: "#fff3c4", fontFamily: "var(--mono)", fontSize: 11.5, padding: "8px 16px", borderRadius: 99, border: "1.5px solid var(--border)", boxShadow: "3px 3px 0 var(--gold)", zIndex: 20 }}
+          style={themedStyle({ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", background: "var(--border)", color: "#fff3c4", fontFamily: "var(--mono)", fontSize: 11.5, padding: "8px 16px", borderRadius: 99, border: "1.5px solid var(--border)", boxShadow: "3px 3px 0 var(--gold)", zIndex: 20 })}
         >
           ↓ 回到底部
         </div>
@@ -507,11 +508,11 @@ function SessionView() {
       </div>}
       <div
         className="composer"
-        style={{
+        style={themedStyle({
           display: "flex",
           gap: 9,
           alignItems: "flex-end",
-        }}
+        })}
       >
         <input
           aria-label="消息指令"
@@ -526,7 +527,7 @@ function SessionView() {
                 ? "发送消息…（运行中将排队）"
                 : "发送消息…"
           }
-          style={{
+          style={themedStyle({
             flex: 1,
             minWidth: 0,
             background: "var(--surface)",
@@ -536,11 +537,11 @@ function SessionView() {
             padding: "11px 13px",
             fontSize: 16,
             outline: "none",
-          }}
+          })}
         />
         <button
           className="btn"
-          style={{ width: 46, height: 42, flexShrink: 0, padding: 0 }}
+          style={themedStyle({ width: 46, height: 42, flexShrink: 0, padding: 0 })}
           disabled={!input.trim() || !canDrive || sending || uncertain}
           onClick={send}
         >

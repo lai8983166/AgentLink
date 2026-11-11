@@ -1,3 +1,4 @@
+import { themedStyle } from "../../../shared/src/ui-theme";
 import { useState } from "react";
 import { useStore } from "../store";
 import { useVisibleViewport } from "../visible-viewport";
@@ -35,9 +36,9 @@ export function PairScreen() {
   }
 
   return (
-    <div style={{ ...viewportStyle, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, overflowY: "auto" }}>
-      <div
-        style={{
+    <div style={themedStyle({ ...viewportStyle, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, overflowY: "auto" })}>
+      <div className="collage-panel"
+        style={themedStyle({
           background: "var(--surface)",
           border: "1.5px solid var(--border)",
           borderRadius: 16,
@@ -45,16 +46,16 @@ export function PairScreen() {
           padding: 24,
           width: "100%",
           maxWidth: 360,
-        }}
+        })}
       >
-        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 4 }}>
-          <span className="logo" style={{ marginRight: 8 }} />
+        <div style={themedStyle({ fontWeight: 700, fontSize: 18, marginBottom: 4 })}>
+          <span className="logo" style={themedStyle({ marginRight: 8 })} />
           AgentLink
         </div>
-        <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 16, fontFamily: "var(--mono)" }}>
+        <div style={themedStyle({ fontSize: 13, color: "var(--text-dim)", marginBottom: 16, fontFamily: "var(--mono)" })}>
           // 粘贴电脑上的配对 token
         </div>
-        {isAndroidApp() && <input aria-label="服务器地址" type="url" value={server} onChange={(e) => setServer(e.target.value)} placeholder="https://你的 AgentLink 地址" autoCapitalize="none" autoCorrect="off" style={{ width: "100%", padding: 12, fontSize: 16, marginBottom: 12 }} />}
+        {isAndroidApp() && <input aria-label="服务器地址" type="url" value={server} onChange={(e) => setServer(e.target.value)} placeholder="https://你的 AgentLink 地址" autoCapitalize="none" autoCorrect="off" style={themedStyle({ width: "100%", padding: 12, fontSize: 16, marginBottom: 12 })} />}
         <input
           type="password"
           aria-label="配对 token"
@@ -62,7 +63,7 @@ export function PairScreen() {
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="agentlink token"
-          style={{
+          style={themedStyle({
             width: "100%",
             padding: 12,
             fontFamily: "var(--mono)",
@@ -72,12 +73,12 @@ export function PairScreen() {
             outline: "none",
             background: "var(--surface-2)",
             marginBottom: 12,
-          }}
+          })}
         />
         {err && (
-          <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10, fontFamily: "var(--mono)" }}>{err}</div>
+          <div style={themedStyle({ color: "var(--red)", fontSize: 12, marginBottom: 10, fontFamily: "var(--mono)" })}>{err}</div>
         )}
-        <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={submit}>
+        <button className="btn" style={themedStyle({ width: "100%" })} disabled={busy} onClick={submit}>
           {busy ? "正在连接…" : "配对"}
         </button>
       </div>

@@ -1,3 +1,4 @@
+import { themedStyle } from "../../../shared/src/ui-theme";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../runtime";
@@ -30,7 +31,7 @@ export function DesktopBanner(props: {
   // 已接管：不显示横幅（正常驾驶中）
   if (takenOver && !desktopGone) {
     return forkedFromId ? (
-      <div style={hint}>
+      <div style={themedStyle(hint)}>
         <span>🧬 此会话从 <i className="hash">#</i>{forkedFromId.slice(0, 8)} 接力而来（历史完整继承）</span>
       </div>
     ) : null;
@@ -39,9 +40,9 @@ export function DesktopBanner(props: {
   // 谱系：旧会话存在更新后代 → 引导直达
   if (forkedToId) {
     return (
-      <div style={{ ...banner, background: "var(--blue-bg)", color: "#2c47c4" }}>
+      <div style={themedStyle({ ...banner, background: "var(--blue-bg)", color: "#2c47c4" })}>
         <span>🧬 此会话已接力至新会话，最新进展在那里</span>
-        <Link to={`/${forkedToId}`} style={{ fontWeight: 700, color: "#2c47c4", textDecoration: "underline dotted" }}>
+        <Link to={`/${forkedToId}`} style={themedStyle({ fontWeight: 700, color: "#2c47c4", textDecoration: "underline dotted" })}>
           打开 →
         </Link>
       </div>
@@ -91,19 +92,19 @@ export function DesktopBanner(props: {
   }
 
   const resumeButton = onResumed && (
-    <button className="btn" style={actionStyle} disabled={busy || forking || resuming} onClick={handleResume}>
+    <button className="btn" style={themedStyle(actionStyle)} disabled={busy || forking || resuming} onClick={handleResume}>
       {resuming ? "检查并恢复中…" : "继续原会话"}
     </button>
   );
 
   if (ipcFailed) {
     return (
-      <div style={{ ...banner, background: "var(--red-bg)", color: "var(--red)" }}>
+      <div style={themedStyle({ ...banner, background: "var(--red-bg)", color: "var(--red)" })}>
         <span>⚠️ {error ?? "委托通道不可用（找不到会话拥有者）"}</span>
         {resumeButton}
         <button
           className="btn ghost"
-          style={{ height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 }}
+          style={themedStyle({ height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 })}
           disabled={busy || forking || resuming}
           onClick={handleFork}
         >
@@ -114,14 +115,14 @@ export function DesktopBanner(props: {
   }
 
   return (
-    <div style={{ ...banner, background: "var(--gold)", color: "var(--text)" }}>
+    <div style={themedStyle({ ...banner, background: "var(--gold)", color: "var(--text)" })}>
       <span>
         ⏳ {error ?? (desktopGone ? "电脑端连接不可用；会话已关闭时，可继续原会话" : `${activeVia ?? "电脑端"}原会话 · 可观察或接管`)}
       </span>
       {resumeButton}
       <button
         className="btn"
-        style={{ height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 }}
+        style={themedStyle({ height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 })}
         disabled={busy || forking || resuming}
         onClick={handleTakeover}
       >

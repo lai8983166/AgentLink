@@ -1,3 +1,4 @@
+import { themedStyle } from "../../../shared/src/ui-theme";
 import { useState } from "react";
 import type { ApprovalDecision } from "@agentlink/shared";
 import { visibleDecisions } from "../store";
@@ -69,7 +70,7 @@ export function ApprovalCard({
               : "✕ 已拒绝并中断";
     return (
       <div
-        style={{
+        style={themedStyle({
           margin: "14px 0 0",
           border: "1.5px dashed var(--border)",
           borderRadius: 16,
@@ -78,7 +79,7 @@ export function ApprovalCard({
           fontSize: 12.5,
           fontWeight: 550,
           color: resolved.decision.startsWith("accept") ? "var(--green)" : resolved.decision === "expired" ? "var(--text-faint)" : "var(--red)",
-        }}
+        })}
       >
         {a.command ?? "文件改动"} — {text}
       </div>
@@ -88,21 +89,21 @@ export function ApprovalCard({
   return (
     <div
       id={`approval-${a.approvalId}`}
-      style={{
+      style={themedStyle({
         margin: "14px 0 0",
         border: "1.5px solid var(--border)",
         borderRadius: 16,
         background: "#fffae3",
         boxShadow: "4px 4px 0 var(--border)",
         padding: "13px 14px",
-      }}
+      })}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "var(--gold-deep)" }}>
+      <div style={themedStyle({ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "var(--gold-deep)" })}>
         ⚠️ {a.kind === "command" ? "请求执行命令" : "请求修改文件"}
       </div>
       {a.command && (
         <div
-          style={{
+          style={themedStyle({
             fontFamily: "var(--mono)",
             fontSize: 12.5,
             background: "var(--surface)",
@@ -112,39 +113,39 @@ export function ApprovalCard({
             marginTop: 10,
             wordBreak: "break-all",
             lineHeight: 1.5,
-          }}
+          })}
         >
           {a.command}
         </div>
       )}
-      <div style={{ fontSize: 11, color: "var(--text-faint)", fontFamily: "var(--mono)", marginTop: 7 }}>{a.cwd}</div>
+      <div style={themedStyle({ fontSize: 11, color: "var(--text-faint)", fontFamily: "var(--mono)", marginTop: 7 })}>{a.cwd}</div>
       {a.command?.includes("rm ") && (
-        <div style={{ fontSize: 11.5, color: "var(--red)", marginTop: 8 }}>⚠ 含删除操作 · 请确认</div>
+        <div style={themedStyle({ fontSize: 11.5, color: "var(--red)", marginTop: 8 })}>⚠ 含删除操作 · 请确认</div>
       )}
       {a.reason && (
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 8, lineHeight: 1.6, borderTop: "1px dotted #cbbe97", paddingTop: 8 }}>
+        <div style={themedStyle({ fontSize: 12, color: "var(--text-dim)", marginTop: 8, lineHeight: 1.6, borderTop: "1px dotted #cbbe97", paddingTop: 8 })}>
           Agent 说明：{a.reason}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "var(--red)", marginTop: 8 }}>{error}</div>}
-      <div style={{ display: "flex", gap: 9, marginTop: 13 }}>
+      {error && <div style={themedStyle({ fontSize: 12, color: "var(--red)", marginTop: 8 })}>{error}</div>}
+      <div style={themedStyle({ display: "flex", gap: 9, marginTop: 13 })}>
         {decisions.includes("decline") && (
-          <button className="btn ghost" style={{ flex: 1 }} disabled={busy} onClick={() => decide("decline")}>
+          <button className="btn ghost" style={themedStyle({ flex: 1 })} disabled={busy} onClick={() => decide("decline")}>
             拒绝
           </button>
         )}
         {decisions.includes("cancel") && decisions.indexOf("cancel") < decisions.indexOf("accept") && !decisions.includes("decline") && (
-          <button className="btn ghost" style={{ flex: 1 }} disabled={busy} onClick={() => decide("cancel")}>
+          <button className="btn ghost" style={themedStyle({ flex: 1 })} disabled={busy} onClick={() => decide("cancel")}>
             拒绝并中断
           </button>
         )}
-        <button className="btn" style={{ flex: 1 }} disabled={busy} onClick={() => decide("accept")}>
+        <button className="btn" style={themedStyle({ flex: 1 })} disabled={busy} onClick={() => decide("accept")}>
           批准
         </button>
       </div>
       {decisions.includes("acceptForSession") && (
         <div
-          style={{ textAlign: "center", fontSize: 11.5, color: "var(--text-dim)", marginTop: 11, cursor: busy ? "default" : "pointer", textDecoration: "underline dotted", fontFamily: "var(--mono)" }}
+          style={themedStyle({ textAlign: "center", fontSize: 11.5, color: "var(--text-dim)", marginTop: 11, cursor: busy ? "default" : "pointer", textDecoration: "underline dotted", fontFamily: "var(--mono)" })}
           onClick={() => !busy && decide("acceptForSession")}
         >
           批准，且本会话内不再询问此类操作

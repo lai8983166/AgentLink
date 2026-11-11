@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { uiTheme } from "../shared/src/ui-theme";
 
 const appBuild = new Date().toISOString();
 const buildMetadata: Plugin = {
@@ -25,8 +26,8 @@ export default defineConfig(({ mode }) => ({
         name: "AgentLink",
         short_name: "AgentLink",
         description: "家里 agent 的遥控器：派任务、看进度、批审批",
-        theme_color: "#FFD700",
-        background_color: "#FDF9EF",
+        theme_color: uiTheme.primary,
+        background_color: uiTheme.paper,
         display: "standalone",
         start_url: "/",
         icons: [

@@ -1,3 +1,4 @@
+import { themedStyle } from "../../../shared/src/ui-theme";
 import type { ReactNode } from "react";
 
 /** markdown-lite：代码围栏 + 行内 code + 换行（agent 输出的常见形态） */
@@ -12,7 +13,7 @@ export function MarkdownLite({ text }: { text: string }): ReactNode {
           return (
             <pre
               key={i}
-              style={{
+              style={themedStyle({
                 fontFamily: "var(--mono)",
                 fontSize: 11.5,
                 lineHeight: 1.6,
@@ -24,7 +25,7 @@ export function MarkdownLite({ text }: { text: string }): ReactNode {
                 margin: "8px 0",
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-all",
-              }}
+              })}
             >
               {body}
             </pre>
@@ -44,7 +45,7 @@ function InlineText({ text }: { text: string }): ReactNode {
         i % 2 === 1 ? (
           <code
             key={i}
-            style={{
+            style={themedStyle({
               fontFamily: "var(--mono)",
               fontSize: 12,
               background: "#fff1a8",
@@ -52,12 +53,12 @@ function InlineText({ text }: { text: string }): ReactNode {
               padding: "1px 5px",
               borderRadius: 5,
               color: "#5a4a00",
-            }}
+            })}
           >
             {seg}
           </code>
         ) : (
-          <span key={i} style={{ whiteSpace: "pre-wrap" }}>
+          <span key={i} style={themedStyle({ whiteSpace: "pre-wrap" })}>
             {seg}
           </span>
         ),

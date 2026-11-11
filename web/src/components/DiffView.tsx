@@ -1,3 +1,4 @@
+import { themedStyle } from "../../../shared/src/ui-theme";
 import type { HistoryItem } from "@agentlink/shared";
 
 /** diff 全屏：逐行着色 + ± 统计（任务 7.4；内容来自 patchUpdated/outputTail） */
@@ -11,41 +12,41 @@ export function DiffView({
   const lines = (item.outputTail ?? "").split("\n").filter((l) => l.trim() !== "");
   return (
     <div
-      style={{
+      style={themedStyle({
         position: "fixed",
         inset: 0,
         zIndex: 60,
         background: "var(--bg)",
         display: "flex",
         flexDirection: "column",
-      }}
+      })}
     >
       <div className="topbar">
         <div className="back" onClick={onClose}>
           ‹
         </div>
         <div className="title">
-          <div className="name" style={{ fontSize: 14 }}>
+          <div className="name" style={themedStyle({ fontSize: 14 })}>
             改动预览
           </div>
           <div className="sub">{item.target}</div>
         </div>
         {item.diffStat && (
-          <span style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700 }}>
-            <span style={{ color: "var(--green)" }}>+{item.diffStat.added}</span>{" "}
-            <span style={{ color: "var(--red)" }}>−{item.diffStat.removed}</span>
+          <span style={themedStyle({ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700 })}>
+            <span style={themedStyle({ color: "var(--green)" })}>+{item.diffStat.added}</span>{" "}
+            <span style={themedStyle({ color: "var(--red)" })}>−{item.diffStat.removed}</span>
           </span>
         )}
       </div>
       <div
-        style={{
+        style={themedStyle({
           flex: 1,
           overflow: "auto",
           padding: "10px 0",
           fontFamily: "var(--mono)",
           fontSize: 11.5,
           lineHeight: 1.75,
-        }}
+        })}
       >
         {lines.length === 0 ? (
           <div className="empty-note">
@@ -56,7 +57,7 @@ export function DiffView({
           lines.map((l, i) => (
             <div
               key={i}
-              style={{
+              style={themedStyle({
                 padding: "0 14px",
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-all",
@@ -73,7 +74,7 @@ export function DiffView({
                       ? "var(--accent)"
                       : "#7a7160",
                 fontWeight: l.startsWith("@@") ? 700 : undefined,
-              }}
+              })}
             >
               {l}
             </div>

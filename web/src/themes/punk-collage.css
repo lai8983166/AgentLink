@@ -1,0 +1,48 @@
+/* AgentLink adaptation of UILIB's punk-collage art direction. Classic theme.css stays intact. */
+html[data-ui-theme="punk-collage"] {
+  --bg: #efeae0; --surface: #fff; --surface-2: #e8e4dc;
+  --border: #000; --border-soft: #bab5ac; --ink-shadow: 4px 4px 0 #000;
+  --text: #0a0a0a; --text-dim: #3b3b3b; --text-faint: #626262;
+  --gold: #ffd400; --gold-deep: #c41019; --gold-bg: #ffe8e8;
+  --accent: #c41019; --green: #146c32; --green-bg: #dff7e5;
+  --red: #c41019; --red-bg: #ffe3e4; --blue-bg: #dff5ff;
+}
+html[data-ui-theme="punk-collage"] body { background-image: radial-gradient(#00000016 1px, transparent 1px); background-size: 9px 9px; }
+html[data-ui-theme="punk-collage"] .topbar { border-bottom: 3px solid #000; }
+html[data-ui-theme="punk-collage"] .topbar .name { font-weight: 700; transform: skewX(-5deg); }
+html[data-ui-theme="punk-collage"] .logo { background: #e8151c; border: 2px solid #000; border-radius: 0; transform: rotate(-8deg); box-shadow: 3px 3px 0 #000; }
+html[data-ui-theme="punk-collage"] .section-label { color: #0a0a0a; font-weight: 700; transform: rotate(-1.5deg); }
+html[data-ui-theme="punk-collage"] .section-label::before { content: "/// "; color: #e8151c; font-weight: 700; }
+html[data-ui-theme="punk-collage"] .card {
+  border: 2px solid #000; border-radius: 0; box-shadow: 4px 4px 0 #000;
+  position: relative; isolation: isolate;
+  background-image: radial-gradient(#0000000c 1px, transparent 1px); background-size: 7px 7px;
+}
+/* Paper cut marks sit outside text and do not clip content or focus outlines. */
+html[data-ui-theme="punk-collage"] .card::after {
+  content: ""; position: absolute; top: -2px; right: -2px; width: 14px; height: 14px; pointer-events: none;
+  background: linear-gradient(45deg, transparent 43%, #000 44% 56%, var(--bg) 57%);
+}
+html[data-ui-theme="punk-collage"] .card.dim { opacity: .72; border-style: dashed; box-shadow: none; }
+html[data-ui-theme="punk-collage"] .btn,
+html[data-ui-theme="punk-collage"] .fab,
+html[data-ui-theme="punk-collage"] .icon-btn {
+  border: 2px solid #000; border-radius: 0; box-shadow: 4px 4px 0 #000;
+  background: #e8151c; color: #fff; font-weight: 700;
+  transition: transform 100ms ease; filter: none;
+}
+html[data-ui-theme="punk-collage"] .btn.ghost,
+html[data-ui-theme="punk-collage"] .icon-btn { background: #fff; color: #0a0a0a; }
+html[data-ui-theme="punk-collage"] .btn:active,
+html[data-ui-theme="punk-collage"] .fab:active { transform: translate(2px, 2px); }
+html[data-ui-theme="punk-collage"] .btn:disabled { opacity: .55; }
+html[data-ui-theme="punk-collage"] .chip { border: 1.5px solid #000; border-radius: 0; }
+html[data-ui-theme="punk-collage"] .hash { color: #e8151c; }
+html[data-ui-theme="punk-collage"] input,
+html[data-ui-theme="punk-collage"] textarea { border-radius: 0 !important; border-width: 2px !important; }
+html[data-ui-theme="punk-collage"] :is(input,textarea,button,a):focus-visible { outline: 2px solid #e8151c; outline-offset: 3px; }
+html[data-ui-theme="punk-collage"] .collage-panel { position: relative; }
+html[data-ui-theme="punk-collage"] .collage-panel::after { content: ""; position: absolute; top: 5px; right: 12px; width: 36px; height: 5px; background: #e8151c; transform: skewX(-25deg); pointer-events: none; }
+html[data-ui-theme="punk-collage"] .collage-title { font-weight: 700; transform: skewX(-5deg); }
+html[data-ui-theme="punk-collage"] [data-message-type="user"] { background: #151515 !important; color: #fff; }
+@media (prefers-reduced-motion: reduce) { html[data-ui-theme="punk-collage"] .btn { transition: none; } }
