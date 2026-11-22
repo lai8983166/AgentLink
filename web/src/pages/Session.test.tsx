@@ -177,7 +177,7 @@ describe("原会话连接不会回落到独立 resume", () => {
   test("桌面会话闲置且 owner 不可达：只观察，失败也不自动 resume", async () => {
     vi.mocked(api.observe).mockRejectedValueOnce({ code: "IPC_OWNER_NOT_FOUND" });
     mount(session({ desktopManaged: true, activeElsewhere: false, desktopGone: true }));
-    await screen.findByText("电脑端未打开原会话；可以点击继续原会话，或在 Codex 中打开后接管");
+    await screen.findByText("可在手机上点「接管此会话」，由后台检查并恢复原会话。");
     expect(api.observe).toHaveBeenCalledWith("desktop-1");
     expect(api.resume).not.toHaveBeenCalled();
   });

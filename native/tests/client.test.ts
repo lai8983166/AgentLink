@@ -235,6 +235,26 @@ describe("NSH client safe operations", () => {
     for (const action of ["resume", "takeover", "fork", "interrupt", "policy"] as const) await client.action(action);
     expect(port.writes).toHaveLength(0);
   });
+  test("explicit takeover checks desktop ownership and resumes the same ID when no owner is found", async () => {
+    const { client, port } = make(); await client.bootstrap(); await client.open(summary.id);
+    client.view.detail!.session = { ...client.view.detail!.session, desktopManaged: true, desktopGone: true, status: "unknown", controlMode: "observe" };
+    expect(controls(client.view.detail, true)).toMatchObject({ drive: false, takeover: true, resume: true, fork: false });
+    const call = port.call.bind(port);
+    port.call = async (op, data) => {
+      if (op === "request" && data.path.endsWith("/takeover")) {
+        port.writes.push(data);
+        return { status: 404, body: JSON.stringify({ error: { code: "IPC_OWNER_NOT_FOUND", message: "synthetic owner missing" } }) };
+      }
+      return call(op, data);
+    };
+    await client.action("takeover");
+    expect(port.writes.map(write => write.path)).toEqual([
+      `/api/v1/sessions/${summary.id}/takeover`,
+      `/api/v1/sessions/${summary.id}/resume?history=window`,
+    ]);
+    expect(client.view.detail?.session.id).toBe(summary.id);
+    expect(canControl(client.view.detail, client.view.fresh)).toBe(true);
+  });
   test("approval decisions use current server capabilities and competing decisions remain errors", async () => {
     const { port, client } = make(); await client.bootstrap(); await client.open(summary.id);
     client.view.detail!.session.approvals = [{ approvalId: "synthetic-approval", kind: "command", command: "echo example", cwd: "/workspace/example", reason: null, availableDecisions: ["accept", "decline"] }] as any;

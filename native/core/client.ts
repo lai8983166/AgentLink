@@ -225,11 +225,17 @@ export class Client {
       session: { ...cached.session, status: "unknown", controlMode: "observe", approvals: [] } };
     this.changed();
     this.unlisten = this.ws?.subscribe(id, e => this.event(e));
-    try { this.display(id, await this.load(id)); } catch (e) { this.error(e); }
+    try { this.display(id, await this.load(id)); } catch (e) { if (this.view.screen === "session" && this.view.sessionId === id) this.error(e); }
     const s = this.view.detail?.session;
-    if (this.view.sessionId === id && s?.agent === "codex" && (s.desktopManaged || s.activeElsewhere)) {
+    if (this.view.screen === "session" && this.view.sessionId === id && this.view.fresh && s?.agent === "codex" && (s.desktopManaged || s.activeElsewhere)) {
       try { await this.request(`/api/v1/sessions/${encodeURIComponent(id)}/observe`, "POST", { mode: "observe" }); await this.refresh(); }
-      catch (e) { this.error(e); }
+      catch (e) {
+        if (this.view.screen !== "session" || this.view.sessionId !== id || this.view.busy) return;
+        if (e instanceof ApiError && e.code === "IPC_OWNER_NOT_FOUND") {
+          this.view.notice = "可在手机上点「接管此会话」，由后台检查并恢复原会话。";
+          this.changed();
+        } else this.error(e);
+      }
     }
     await this.recheck();
   }
@@ -302,16 +308,27 @@ export class Client {
   }
   async action(action: "resume" | "takeover" | "interrupt" | "fork" | "policy", body?: unknown) {
     const detail = this.view.detail;
-    if (!this.view.fresh || !detail || detail.session.status === "unknown" || detail.historyPage?.cached) return;
+    if (!this.view.fresh || !detail || detail.historyPage?.cached) return;
+    const checkOwnership = action === "resume" || action === "takeover";
+    if (detail.session.status === "unknown" && !(checkOwnership && detail.session.desktopManaged)) return;
     if (["resume", "takeover", "fork", "policy"].includes(action) && detail.session.agent !== "codex") return;
     if (["interrupt", "policy"].includes(action) && !canControl(detail, true)) return;
     if (action === "interrupt" && detail.session.agent === "claude" && !detail.session.terminal?.canInterrupt) return;
     const id = this.view.sessionId;
     await this.perform(async () => {
       try {
-        const value = await this.request(`/api/v1/sessions/${encodeURIComponent(id)}` + (action === "policy" ? "" : `/${action}${action === "resume" ? "?history=window" : ""}`), action === "policy" ? "PATCH" : "POST", body);
+        const path = `/api/v1/sessions/${encodeURIComponent(id)}`;
+        let resumed = action === "resume";
+        let value;
+        try {
+          value = await this.request(path + (action === "policy" ? "" : `/${action}${resumed ? "?history=window" : ""}`), action === "policy" ? "PATCH" : "POST", body);
+        } catch (e) {
+          if (action !== "takeover" || !(e instanceof ApiError) || e.code !== "IPC_OWNER_NOT_FOUND") throw e;
+          value = await this.request(path + "/resume?history=window", "POST");
+          resumed = true;
+        }
         if (action === "fork") { await this.open(value.id); return; }
-        if (action === "resume") {
+        if (resumed) {
           const d = mergeWindow(undefined, decodeDetail(value));
           if (d && this.view.sessionId === id) this.view.detail = mergeResumedDetail(this.view.detail, d);
         }

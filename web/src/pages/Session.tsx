@@ -115,7 +115,7 @@ function SessionView() {
         .then(connected)
         .catch((e) => {
           if ((e as { code?: string }).code === "IPC_OWNER_NOT_FOUND") {
-            failed("电脑端未打开原会话；可以点击继续原会话，或在 Codex 中打开后接管");
+            failed("可在手机上点「接管此会话」，由后台检查并恢复原会话。");
           } else {
             failed(e instanceof Error ? e.message : "电脑端连接失败，请重试");
           }
@@ -343,6 +343,7 @@ function SessionView() {
         forkedFromId={session?.forkedFromId ?? null}
         forkedToId={session?.forkedToId ?? null}
         onTakenOver={() => {
+          setBusyError(null);
           setTakenOverId(sessionId);
           queryClient.setQueryData<SessionDetailResponse>(["session", sessionId], (old) => old && ({
             ...old, session: { ...old.session, controlMode: "takeover" },
@@ -350,6 +351,7 @@ function SessionView() {
           queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
         }}
         onResumed={async (detail) => {
+          setBusyError(null);
           // 撤销在途观察详情请求，避免它在恢复成功后再次覆盖控制模式。
           await queryClient.cancelQueries({ queryKey: ["session", sessionId] });
           setTakenOverId(null);

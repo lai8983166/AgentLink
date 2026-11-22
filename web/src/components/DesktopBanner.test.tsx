@@ -99,4 +99,17 @@ describe("DesktopBanner（任务 5.1-5.3）", () => {
     expect(api.resume).toHaveBeenCalledWith("s1");
     expect((screen.getByRole("button", { name: "继续原会话" }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  test("手机接管找不到桌面持有者时，恢复同一个会话", async () => {
+    vi.mocked(api.takeover).mockRejectedValueOnce({ code: "IPC_OWNER_NOT_FOUND" });
+    const detail = { session: { id: "s1" } } as Awaited<ReturnType<typeof api.resume>>;
+    vi.mocked(api.resume).mockResolvedValueOnce(detail);
+    const onResumed = vi.fn();
+    const onTakenOver = vi.fn();
+    render(ui({ desktopManaged: true, desktopGone: true, onResumed, onTakenOver }));
+    fireEvent.click(screen.getByRole("button", { name: "接管此会话" }));
+    await waitFor(() => expect(onResumed).toHaveBeenCalledWith(detail));
+    expect(api.resume).toHaveBeenLastCalledWith("s1");
+    expect(onTakenOver).not.toHaveBeenCalled();
+  });
 });

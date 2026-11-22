@@ -14,10 +14,11 @@ export function relativeTime(at: number) {
 }
 export function controls(detail: SessionDetailResponse | undefined, fresh: boolean, errorCode = "") {
   const s = detail?.session;
-  const enabled = !!s && fresh && !detail?.historyPage?.cached && s.status !== "unknown";
+  const verified = !!s && fresh && !detail?.historyPage?.cached;
+  const enabled = verified && s.status !== "unknown";
   const drive = canControl(detail, fresh) && !s?.desktopGone;
   const desktop = !!s && s.agent === "codex" && !drive && (!!s.desktopManaged || (!!s.activeElsewhere && !s.desktopGone));
-  return { drive, desktop, takeover: enabled && desktop, resume: enabled && desktop,
+  return { drive, desktop, takeover: verified && desktop, resume: verified && desktop,
     fork: enabled && desktop && errorCode === "IPC_OWNER_NOT_FOUND",
     interrupt: drive && (s?.status === "running" || s?.status === "waiting_approval") && (s?.agent !== "claude" || !!s.terminal?.canInterrupt),
     policy: drive && s?.agent === "codex" };

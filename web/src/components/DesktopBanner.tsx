@@ -54,8 +54,16 @@ export function DesktopBanner(props: {
   async function handleTakeover() {
     setBusy(true);
     setError(null);
+    setIpcFailed(false);
     try {
-      await api.takeover(sessionId);
+      try {
+        await api.takeover(sessionId);
+      } catch (e) {
+        if ((e as { code?: string })?.code !== "IPC_OWNER_NOT_FOUND" || !onResumed) throw e;
+        const result = await api.resume(sessionId);
+        await onResumed(result);
+        return;
+      }
       onTakenOver();
     } catch (e) {
       setError(e instanceof Error ? e.message : "接管失败，请重试");
@@ -102,6 +110,9 @@ export function DesktopBanner(props: {
       <div style={themedStyle({ ...banner, background: "var(--red-bg)", color: "var(--red)" })}>
         <span>⚠️ {error ?? "委托通道不可用（找不到会话拥有者）"}</span>
         {resumeButton}
+        <button className="btn" style={themedStyle(actionStyle)} disabled={busy || forking || resuming} onClick={handleTakeover}>
+          {busy ? "接管中…" : "重试接管"}
+        </button>
         <button
           className="btn ghost"
           style={themedStyle({ height: 32, borderRadius: 9, boxShadow: "2px 2px 0 var(--border)", fontSize: 12.5 })}
