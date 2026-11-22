@@ -201,6 +201,19 @@ export class CodexBridge {
     }
   }
 
+  /** Read the status on this server instance; only an already loaded idle thread can be joined. */
+  async assertSharedThreadIdle(threadId: string): Promise<void> {
+    const value = await this.rpc.call<{ thread?: { id?: string; status?: { type?: string } } }>(
+      CodexMethod.threadRead, { threadId, includeTurns: false },
+    );
+    if (value?.thread?.id !== threadId || value.thread.status?.type === "notLoaded") {
+      throw new DaemonError("IPC_UNAVAILABLE", "该会话未在共享 App Server 中打开");
+    }
+    if (value.thread.status?.type !== "idle") {
+      throw new DaemonError("SESSION_BUSY", "共享会话当前不可接管，请等待本轮结束后重试");
+    }
+  }
+
   async threadTurns(threadId: string): Promise<CodexThreadTurnsResult> {
     // desc：取最新轮次（长会话只拉最近 50 轮，旧行为 asc 会停在会话开头）
     const res = await this.rpc.call<CodexThreadTurnsResult>(CodexMethod.threadTurnsList, {

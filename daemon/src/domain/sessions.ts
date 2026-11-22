@@ -129,12 +129,14 @@ export class SessionRegistry {
     private readonly controls: ControlStore = new ControlStore(),
     private readonly assertNoWriter: (id: string) => Promise<void> = assertNoThreadWriter,
     private readonly resumeSettings: (id: string) => Promise<ResumeSettings> = readResumeSettings,
+    private readonly sharedAppServer = false,
   ) {}
 
   async start(): Promise<void> {
     this.bridge.onFact((f) => this.consume(f));
     this.bridge.onRestart(() => {
       this.loaded.clear();
+      if (this.sharedAppServer) this.live.clear();
       // codex 重启：实时状态全丢，回读 rollout 重建
       for (const [id, s] of this.live) {
         if (s.summary.status === "running" || s.summary.status === "waiting_approval") {
@@ -211,7 +213,7 @@ export class SessionRegistry {
       const lastActivityAt = updatedAtSec > 0 ? updatedAtSec * 1000 : 0;
       const activeElsewhere = updatedAtSec > 0 && Date.now() / 1000 - updatedAtSec < 300;
       const activeVia = activeElsewhere ? originatorLabel(t.originator) : null;
-      const desktopManaged = /desktop|vscode/i.test(String(t.originator ?? "")) || /desktop|vscode/i.test(String(t.source ?? ""));
+      const desktopManaged = this.sharedAppServer || /desktop|vscode/i.test(String(t.originator ?? "")) || /desktop|vscode/i.test(String(t.source ?? ""));
       this.rolloutIndex.set(t.id, {
         id: t.id,
         title: ((t as { name?: string }).name || t.preview || "").slice(0, 40) || "既有会话",
@@ -288,9 +290,10 @@ export class SessionRegistry {
         title: "既有会话",
         cwd: "",
         agent: "codex",
-        status: "idle",
+        status: this.sharedAppServer ? "unknown" : "idle",
         activeElsewhere: false,
         activeVia: null,
+        desktopManaged: this.sharedAppServer,
         forkedFromId: null,
         forkedToId: null,
         desktopGone: false,
@@ -376,6 +379,22 @@ export class SessionRegistry {
     // 页面刷新或两个手机重复恢复，不能重置正在运行的任务。
     if (this.loaded.has(id) && this.live.has(id)) return (await this.detail(id)).session;
     const { session } = await this.detail(id);
+    if (this.sharedAppServer) {
+      // Subscription is on the same authenticated server; preserve its current policy/sandbox.
+      await this.bridge.assertSharedThreadIdle(id);
+      const thread = await this.bridge.threadResume(id);
+      const { history, tokenUsage, approvals: _approvals, controlMode: _mode, ...summaryBase } = session;
+      this.live.set(id, {
+        summary: { ...summaryBase, status: "idle", statusUpdatedAt: Date.now(), activeElsewhere: false,
+          activeVia: null, desktopGone: false, desktopManaged: false, pendingApprovals: 0,
+          approvalPolicy: thread.approvalPolicy ?? session.approvalPolicy },
+        history, tokenUsage, desiredPolicy: undefined, activity: null,
+      });
+      this.loaded.add(id);
+      this.publishStatus(id, this.live.get(id)!);
+      this.bus.publish(id, { type: "history.sync" });
+      return (await this.detail(id)).session;
+    }
     const desktopOrigin = !!this.rolloutIndex.get(id)?.desktopManaged || !!this.desktop?.has(id);
     if (desktopOrigin && !this.desktop?.ownerAlive) {
       throw new DaemonError("IPC_UNAVAILABLE", "无法确认电脑端已释放原会话，未恢复会话");
@@ -490,12 +509,17 @@ export class SessionRegistry {
 
   /** 观察桌面持有的会话（busy 会话实时流）；IPC 不可用抛出对应错误 */
   async observe(id: string, mode: "observe" | "takeover" = "observe"): Promise<void> {
+    if (this.sharedAppServer) {
+      if (mode === "takeover") await this.resume(id);
+      return;
+    }
     if (this.live.has(id)) return;
     if (!this.desktop) throw new DaemonError("INTERNAL", "桌面 IPC 未启用");
     await this.desktop.observe(id, mode);
   }
 
   async takeover(id: string): Promise<void> {
+    if (this.sharedAppServer) { await this.resume(id); return; }
     if (this.live.has(id)) return;
     if (!this.desktop) throw new DaemonError("INTERNAL", "桌面 IPC 未启用");
     await this.desktop.takeover(id);

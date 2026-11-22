@@ -83,3 +83,13 @@ WS     /ws?token=…（订阅消息切换会话，lastSeq 断线补发）
 `~/.agentlink/`：`config.toml`（token / 白名单根目录 / ntfy）、`audit.db`（审批审计，SQLite）。
 不写入 `~/.codex`（只读复用其 auth 与 rollout）。
 codex 协议版本锁定 0.160.0（`src/codex/protocol.ts` 为唯一适配层）。
+## 共享 Codex App Server（实验模式）
+
+AgentLink 可以作为客户端接入一个已经运行的、带能力令牌的本机 App Server。Codex 桌面端必须从启动时就连接该实例。已经由桌面私有 App Server 打开的会话需要先安排切换，不能通过修改手机端地址迁入。
+
+1. 启动隔离的 Codex App Server，例如使用 `codex app-server --listen ws://127.0.0.1:45820 --ws-auth capability-token --ws-token-file <私有令牌文件>`。令牌文件应包含至少 32 字符的随机值，只在本机保存。
+2. 启动测试用 AgentLink 时设置 `AGENTLINK_SHARED_APP_SERVER_URL=ws://127.0.0.1:45820` 和 `AGENTLINK_SHARED_APP_SERVER_TOKEN_FILE=<私有令牌文件>`。如需桌面中转，同时设置 `AGENTLINK_SHARED_DESKTOP_PORT=45821`、`AGENTLINK_SHARED_DESKTOP_KEY_FILE=<独立的随机密钥文件>`。中转只监听本机。令牌和中转密钥不要用于手机配对。
+3. 用独立桌面配置启动 Codex，并为该进程设置 `CODEX_APP_SERVER_WS_URL=ws://127.0.0.1:45821/<中转密钥>`。此桌面启动选项有版本依赖。中转在桌面读取共享实例中已经加载的会话后，在同一桌面连接上订阅它。
+4. 在手机进入同一会话，点「接管此会话」后发送。共享模式要求会话已在该实例中加载且空闲才接受接管，接管和发送沿用原会话执行设置。
+
+隔离验证中，NSH 客户端核心经过真实 REST/WS 完成观察、接管和发送。Windows 桌面连接收到同一会话的用户消息、回复及完成事件。桌面界面渲染和安卓真机操作需另验。

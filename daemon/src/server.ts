@@ -57,6 +57,7 @@ export function createApp(opts: {
   auditPath?: string;
   /** 自动化测试禁用真实桌面管道，保证不触碰用户会话。 */
   desktop?: false;
+  sharedAppServer?: boolean;
   assertNoWriter?: (id: string) => Promise<void>;
   resumeSettings?: (id: string) => Promise<ResumeSettings>;
   desktopFactory?: (bus: SessionEventBus, approvals: ApprovalService, controls: ControlStore) => DesktopSessionManager;
@@ -87,7 +88,7 @@ export function createApp(opts: {
   const approvals = new ApprovalService(opts.bridge, bus, audit);
   const fs = new FsService(opts.allowedRoots);
   const controls = new ControlStore(opts.auditPath ? `${opts.auditPath}.controls` : join(configDir(), "controls.db"));
-  const registry = new SessionRegistry(opts.bridge, bus, approvals, fs, controls, opts.assertNoWriter, opts.resumeSettings);
+  const registry = new SessionRegistry(opts.bridge, bus, approvals, fs, controls, opts.assertNoWriter, opts.resumeSettings, opts.sharedAppServer);
   const claude = new ClaudeSessions(opts.auditPath ? `${opts.auditPath}.claude` : join(configDir(), "claude.db"), bus, fs, audit);
   const claudeCatalog = new ClaudeCatalog(opts.claudeProjectsDir ?? (opts.auditPath ? false : join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects")), id => ({ latestSeq: bus.latestSeq(id), serverEpoch: bus.epoch }));
   const push = new WebPushService(new PushStore(opts.auditPath ? `${opts.auditPath}.push` : join(configDir(), "push.db")), opts.pushSender);
@@ -104,7 +105,7 @@ export function createApp(opts: {
   opts.bridge.onRestart(() => limitsRefresh.invalidate());
 
   // 桌面 IPC follower（任务 3.1）：观察/接管桌面持有会话
-  const desktop = opts.desktop === false ? undefined : opts.desktopFactory?.(bus, approvals, controls) ?? new DesktopSessionManager(bus, approvals, {
+  const desktop = opts.desktop === false || opts.sharedAppServer ? undefined : opts.desktopFactory?.(bus, approvals, controls) ?? new DesktopSessionManager(bus, approvals, {
     controls,
     log: (...a: unknown[]) => console.log("[desktop]", ...a),
   });

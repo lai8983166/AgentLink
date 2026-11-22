@@ -20,20 +20,41 @@ beforeEach(() => {
 /* ============ 4.1/4.2 状态机 ============ */
 
 describe("SessionRegistry 状态机", () => {
-  async function setup(assertNoWriter?: (id: string) => Promise<void>) {
+  async function setup(assertNoWriter?: (id: string) => Promise<void>, sharedAppServer = false) {
     const fake = new FakeCodexServer();
     const bridge = new CodexBridge(fake);
     const bus = new SessionEventBus();
     const audit = new AuditStore(join(tmpRoot, "audit.db"));
     const approvals = new ApprovalService(bridge, bus, audit);
     const fs = new FsService([tmpRoot]);
-    const reg = new SessionRegistry(bridge, bus, approvals, fs, undefined, assertNoWriter, async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }));
+    const reg = new SessionRegistry(bridge, bus, approvals, fs, undefined, assertNoWriter, async () => ({ sandbox: "danger-full-access", approvalPolicy: "never" }), sharedAppServer);
     await bridge.start();
     await reg.start();
     const events: SessionEvent[] = [];
     bus.subscribe("t1", null, (e) => events.push(e as SessionEvent));
     return { fake, bridge, bus, audit, approvals, reg, events };
   }
+
+  test("共享接管只加入同一实例已加载的空闲会话，并保留它的执行设置", async () => {
+    const { reg, fake } = await setup(async () => { throw new Error("unexpected writer probe"); }, true);
+    await reg.observe("old1");
+    await expect(reg.takeover("old1")).rejects.toMatchObject({ code: "IPC_UNAVAILABLE" });
+    fake.threadReadStatus = "active";
+    await expect(reg.takeover("old1")).rejects.toMatchObject({ code: "SESSION_BUSY" });
+    expect(fake.written.some(line => JSON.parse(line).method === "thread/resume")).toBe(false);
+    fake.threadReadStatus = "idle";
+    await reg.takeover("old1");
+    expect((await reg.detail("old1")).session).toMatchObject({ id: "old1", controlMode: "local" });
+    await reg.sendMessage("old1", "人工测试消息", "synthetic-shared-message");
+    const calls = fake.written.map(line => JSON.parse(line));
+    expect(calls.filter(call => call.method === "thread/resume")).toEqual([
+      expect.objectContaining({ params: { threadId: "old1" } }),
+    ]);
+    const sent = calls.find(call => call.method === "turn/start");
+    expect(sent.params.threadId).toBe("old1");
+    expect(sent.params).not.toHaveProperty("approvalPolicy");
+    expect(calls.some(call => call.method === "thread/fork")).toBe(false);
+  });
 
   test("waitingOnApproval → waiting_approval；审批后回 running；完成后 done 且不被 idle 覆盖", async () => {
     const { fake, events, reg } = await setup();

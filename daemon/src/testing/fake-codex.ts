@@ -4,6 +4,7 @@ import type { CodexTransport, CodexTransportFactory } from "../codex/process";
 export class FakeCodexServer implements CodexTransportFactory {
   written: string[] = [];
   resumeError: string | null = null;
+  threadReadStatus = "notLoaded";
   rateLimitsResponse: unknown = null;
   threadListResponse?: (params: Record<string, unknown>) => unknown;
   onTurnStart?: (params: Record<string, unknown>) => void;
@@ -41,6 +42,7 @@ export class FakeCodexServer implements CodexTransportFactory {
           ],
         },
         "thread/resume": { thread: { id: msg.params?.threadId }, approvalPolicy: msg.params?.approvalPolicy ?? "never" },
+        "thread/read": { thread: { id: msg.params?.threadId, status: { type: this.threadReadStatus } } },
         "thread/fork": {
           thread: {
             id: "fork-1",
