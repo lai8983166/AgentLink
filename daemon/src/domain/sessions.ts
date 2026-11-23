@@ -380,9 +380,14 @@ export class SessionRegistry {
     if (this.loaded.has(id) && this.live.has(id)) return (await this.detail(id)).session;
     const { session } = await this.detail(id);
     if (this.sharedAppServer) {
-      // Subscription is on the same authenticated server; preserve its current policy/sandbox.
-      await this.bridge.assertSharedThreadIdle(id);
-      const thread = await this.bridge.threadResume(id);
+      let settings: ResumeSettings | undefined;
+      if (await this.bridge.sharedResumeState(id) === "notLoaded") {
+        settings = await this.resumeSettings(id);
+        await this.assertNoWriter(id);
+        // The desktop may have loaded the thread while we checked its persisted settings.
+        if (await this.bridge.sharedResumeState(id) === "idle") settings = undefined;
+      }
+      const thread = await this.bridge.threadResume(id, settings?.approvalPolicy, settings);
       const { history, tokenUsage, approvals: _approvals, controlMode: _mode, ...summaryBase } = session;
       this.live.set(id, {
         summary: { ...summaryBase, status: "idle", statusUpdatedAt: Date.now(), activeElsewhere: false,

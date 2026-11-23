@@ -38,7 +38,6 @@ describe("SessionRegistry 状态机", () => {
   test("共享接管只加入同一实例已加载的空闲会话，并保留它的执行设置", async () => {
     const { reg, fake } = await setup(async () => { throw new Error("unexpected writer probe"); }, true);
     await reg.observe("old1");
-    await expect(reg.takeover("old1")).rejects.toMatchObject({ code: "IPC_UNAVAILABLE" });
     fake.threadReadStatus = "active";
     await expect(reg.takeover("old1")).rejects.toMatchObject({ code: "SESSION_BUSY" });
     expect(fake.written.some(line => JSON.parse(line).method === "thread/resume")).toBe(false);
@@ -54,6 +53,21 @@ describe("SessionRegistry 状态机", () => {
     expect(sent.params.threadId).toBe("old1");
     expect(sent.params).not.toHaveProperty("approvalPolicy");
     expect(calls.some(call => call.method === "thread/fork")).toBe(false);
+  });
+
+  test("共享服务可恢复未加载且已释放写锁的原会话", async () => {
+    let locked = true;
+    const { reg, fake } = await setup(async () => {
+      if (locked) throw new DaemonError("SESSION_BUSY", "writer active");
+    }, true);
+    fake.threadReadStatus = "notLoaded";
+    await expect(reg.takeover("old1")).rejects.toMatchObject({ code: "SESSION_BUSY" });
+    expect(fake.written.some(line => JSON.parse(line).method === "thread/resume")).toBe(false);
+    locked = false;
+    await reg.takeover("old1");
+    const resumes = fake.written.map(line => JSON.parse(line)).filter(call => call.method === "thread/resume");
+    expect(resumes.map(call => call.params)).toEqual([{ threadId: "old1", sandbox: "danger-full-access", approvalPolicy: "never" }]);
+    expect((await reg.detail("old1")).session.controlMode).toBe("local");
   });
 
   test("waitingOnApproval → waiting_approval；审批后回 running；完成后 done 且不被 idle 覆盖", async () => {

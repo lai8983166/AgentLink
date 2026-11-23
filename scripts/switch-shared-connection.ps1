@@ -1,4 +1,4 @@
-param([switch]$CheckOnly, [string]$SettingsDirectory)
+param([switch]$CheckOnly, [string]$SettingsDirectory, [switch]$ReloadBackend)
 $ErrorActionPreference = 'Stop'
 $dataDir = Join-Path $env:USERPROFILE '.agentlink'
 if (!$SettingsDirectory) {
@@ -46,7 +46,7 @@ if ($existingRelay -and (!$server -or $existingRelay.LocalAddress -ne '127.0.0.1
 $restart = Join-Path $PSScriptRoot 'restart-daemon.ps1'
 $desktop = Join-Path $PSScriptRoot 'open-shared-desktop.ps1'
 if ($CheckOnly) {
-  if (!$existingRelay) { & $restart | Out-Null }
+  if (!$existingRelay -or $ReloadBackend) { & $restart | Out-Null }
   Write-Output 'Preflight passed.'
   return
 }
@@ -62,7 +62,7 @@ if (!$server) {
   }
   if ($i -eq 30) { throw 'Shared Codex server did not start listening.' }
 }
-if (!$existingRelay) {
+if (!$existingRelay -or $ReloadBackend) {
   $env:AGENTLINK_SHARED_APP_SERVER_URL = $endpoint.AbsoluteUri
   $env:AGENTLINK_SHARED_APP_SERVER_TOKEN_FILE = $shared.AppServerTokenFile
   $env:AGENTLINK_SHARED_DESKTOP_PORT = [string]$relay
