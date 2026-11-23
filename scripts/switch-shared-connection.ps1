@@ -52,7 +52,8 @@ if ($CheckOnly) {
 }
 if (Get-Process -Name ChatGPT -ErrorAction SilentlyContinue) { throw 'Fully quit Codex desktop, including its tray icon, then rerun.' }
 if (!$server) {
-  $serverProcess = Start-Process -FilePath $shared.CodexExecutable -ArgumentList @('app-server','--listen',$endpoint.AbsoluteUri,
+  # Codex --listen accepts ws://IP:PORT without the slash added by Uri.AbsoluteUri.
+  $serverProcess = Start-Process -FilePath $shared.CodexExecutable -ArgumentList @('app-server','--listen',$endpoint.GetLeftPart([UriPartial]::Authority),
     '--ws-auth','capability-token','--ws-token-file',('"{0}"' -f $shared.AppServerTokenFile)) -WindowStyle Hidden -PassThru
   for ($i=0; $i -lt 30; $i++) {
     if ($serverProcess.HasExited) { throw 'Shared Codex server exited during startup.' }
